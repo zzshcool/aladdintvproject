@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式專用配色 (深炭灰與暖金) -->
+    <color name="tv_background">#121316</color>
+    <color name="tv_drawer_bg">#E61A1D24</color>
+    <color name="tv_card_bg">#20232B</color>
+    <color name="tv_card_focused">#2E3340</color>
+    <color name="tv_focus_stroke">#E5A93C</color>
+    <color name="tv_accent">#E5A93C</color>
+    <color name="tv_text_primary">#F5F5F7</color>
+    <color name="tv_text_secondary">#9EA3AE</color>
+    <color name="tv_text_highlight">#E5A93C</color>
+    <color name="tv_badge_bg">#2A2E38</color>
+    <color name="tv_overlay_bg">#CC121316</color>
+</resources>

@@ -1,0 +1,61 @@
+<resources>
+    <string name="app_name">阿拉丁TV</string>
+    <string name="loading_channels">正在載入台灣直播頻道列表…</string>
+    <string name="no_channels">無可用頻道，請檢查網路連線</string>
+    <string name="buffering">緩衝載入中…</string>
+    <string name="playback_error">播放異常，正在自動重試…</string>
+    <string name="press_again_to_exit">再按一次退出阿拉丁TV</string>
+    <string name="channel_format">CH %02d</string>
+    <string name="group_default">台灣頻道</string>
+
+    <!-- 設定功能字串 -->
+    <string name="settings">設定</string>
+    <string name="settings_title">系統設定</string>
+    <string name="theme_setting">外觀主題</string>
+    <string name="theme_system">跟隨系統</string>
+    <string name="theme_dark">深色模式</string>
+    <string name="theme_light">淺色模式</string>
+    <string name="refresh_channels">重新整理頻道清單</string>
+    <string name="refresh_channels_success">頻道清單已更新</string>
+    <string name="close_settings">關閉設定</string>
+
+    <!-- 狀態燈字串 -->
+    <string name="status_normal">正常</string>
+    <string name="status_connecting">連線中</string>
+    <string name="status_failed">失敗</string>
+    <string name="status_unknown">未檢查</string>
+    <string name="status_external">外部播放</string>
+    <string name="status_switching_backup">切換備援 (%1$d/%2$d)</string>
+
+    <!-- 畫質偏好字串 -->
+    <string name="quality_setting">畫質上限偏好</string>
+    <string name="quality_auto">自動 (偏好)</string>
+    <string name="quality_1080p">最高 1080p</string>
+    <string name="quality_4k">允許 4K</string>
+    <string name="quality_note">說明：此偏好為解析度上限，實際畫質取決於串流來源與頻寬；YouTube 由其播放器自行調整。</string>
+
+    <!-- 來源狀態字串 -->
+    <string name="source_status_title">頻道來源資訊</string>
+    <string name="source_status_success">清單下載與更新成功</string>
+    <string name="source_status_fallback">遠端下載失敗，沿用快取</string>
+    <string name="source_last_updated">最後更新：%s</string>
+    <string name="source_channels_count">有效頻道：%d 台</string>
+
+    <!-- YouTube 內嵌播放與錯誤字串 -->
+    <string name="youtube_error_embedded_disabled">該官方直播禁止在第三方應用嵌入播放 (錯誤代碼 150)</string>
+    <string name="youtube_error_video_not_found">該官方直播已結束或已設為私人影片 (錯誤代碼 100)</string>
+    <string name="youtube_error_153">缺少 Referer 或安全政策限制 (錯誤代碼 153)</string>
+    <string name="youtube_error_network">YouTube 網路載入異常，請檢查連線</string>
+    <string name="youtube_error_timeout">YouTube 載入逾時無回應</string>
+    <string name="youtube_error_web_watch_failed">官方網頁觀看模式無法在此裝置載入</string>
+    <string name="youtube_autoplay_blocked">自動播放受阻，請按遙控器 OK 鍵或點擊螢幕播放</string>
+    <string name="youtube_error_generic">YouTube 播放失敗 (代碼 %d)</string>
+    <string name="youtube_switching_web_watch">官方禁止嵌入 (150)，切換至官方網頁觀看…</string>
+    <string name="youtube_status_web_watch">官方網頁觀看</string>
+    <string name="btn_retry">重試連線</string>
+    <string name="btn_next_channel">切換下一台</string>
+    <string name="btn_play_manual">按 OK 播放</string>
+    <string name="status_all_sources_failed">所有備援來源已耗盡</string>
+    <string name="tag_geo_blocked">地區限制</string>
+    <string name="tag_part_time">非24H</string>
+</resources>

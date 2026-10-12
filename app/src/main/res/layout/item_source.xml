@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="6dp"
+    android:background="@drawable/bg_channel_focus"
+    android:clickable="true"
+    android:focusable="true"
+    android:focusableInTouchMode="true"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingHorizontal="14dp"
+    android:paddingVertical="10dp">
+
+    <!-- 線路線號 -->
+    <TextView
+        android:id="@+id/tvSourceIndex"
+        android:layout_width="32dp"
+        android:layout_height="wrap_content"
+        android:textColor="@color/tv_text_secondary"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        tools:text="01" />
+
+    <!-- 線路標題與附加說明 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvSourceName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/tv_text_primary"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            tools:text="官方 YouTube 24H 直播" />
+
+        <TextView
+            android:id="@+id/tvSourceExtraInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="@color/tv_text_secondary"
+            android:textSize="11sp"
+            tools:text="免登入 · 無地區限制" />
+    </LinearLayout>
+
+    <!-- 線路類型標籤 -->
+    <TextView
+        android:id="@+id/tvSourceType"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/bg_overlay_panel"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="2dp"
+        android:textColor="@color/tv_accent"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        tools:text="YOUTUBE" />
+
+    <!-- 目前播放中徽章 -->
+    <TextView
+        android:id="@+id/tvSourceSelectedBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/bg_channel_focus"
+        android:paddingHorizontal="8dp"
+        android:paddingVertical="2dp"
+        android:text="目前播放"
+        android:textColor="@color/tv_accent"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        tools:visibility="visible" />
+
+</LinearLayout>
