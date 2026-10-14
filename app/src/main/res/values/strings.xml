@@ -58,4 +58,9 @@
     <string name="status_all_sources_failed">所有備援來源已耗盡</string>
     <string name="tag_geo_blocked">地區限制</string>
     <string name="tag_part_time">非24H</string>
+    <string name="touch_channels">頻道</string>
+    <string name="touch_sources">線路</string>
+    <string name="touch_settings">設定</string>
+    <string name="touch_exit">離開</string>
+    <string name="touch_web">操作網頁</string>
 </resources>

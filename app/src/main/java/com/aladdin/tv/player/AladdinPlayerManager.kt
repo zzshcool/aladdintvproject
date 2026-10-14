@@ -195,8 +195,14 @@ class AladdinPlayerManager(
                         
                         // 深入解析實際 HTTP 狀態碼與根本原因
                         var httpStatusCode: Int? = null
+                        var dnsFailure = false
+                        var connectionFailure = false
+                        var timeoutFailure = false
                         var cause: Throwable? = error.cause
                         while (cause != null) {
+                            dnsFailure = dnsFailure || cause is java.net.UnknownHostException
+                            connectionFailure = connectionFailure || cause is java.net.ConnectException
+                            timeoutFailure = timeoutFailure || cause is java.net.SocketTimeoutException
                             if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
                                 httpStatusCode = cause.responseCode
                                 break
@@ -209,7 +215,13 @@ class AladdinPlayerManager(
                             404, 410 -> "串流來源不存在 (HTTP $httpStatusCode)" to true
                             500, 502, 503, 504 -> "伺服器暫時維護中 (HTTP $httpStatusCode)" to false
                             else -> {
-                                if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) {
+                                if (dnsFailure) {
+                                    "來源網域無法解析，請確認網路或選擇其他線路" to false
+                                } else if (timeoutFailure) {
+                                    "來源回應逾時" to false
+                                } else if (connectionFailure) {
+                                    "無法連接來源伺服器" to false
+                                } else if (error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED) {
                                     "格式不支援" to true
                                 } else {
                                     (error.localizedMessage ?: "串流異常") to false
@@ -218,6 +230,7 @@ class AladdinPlayerManager(
                         }
                         
                         if (isFatalImmediate) {
+                            retryJob?.cancel()
                             // 永久性致命錯誤 (如 HTTP 403 / 404 或格式不支援)，不再無效重試，立即由備援處理
                             onExoPlayerSourceFailed?.invoke(channel, channel.currentSourceIndex, currentSessionToken, errorMsg)
                         } else {
@@ -385,7 +398,7 @@ class AladdinPlayerManager(
             )
 
             retryJob = scope.launch(Dispatchers.Main) {
-                delay(AppConfig.RETRY_INTERVAL_MS)
+                delay(AppConfig.RETRY_INTERVAL_MS * (1L shl (retryCount - 1)))
                 if (token == currentSessionToken) {
                     exoPlayer?.let { player ->
                         val mediaItem = MediaItem.fromUri(channel.url)

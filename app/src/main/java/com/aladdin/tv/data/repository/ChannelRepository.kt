@@ -509,8 +509,14 @@ class ChannelRepository(private val context: Context) {
         }
     }
 
-    fun recordSourceFailure(url: String) {
+    fun recordSourceFailure(url: String, reason: String? = null) {
         if (url.isBlank()) return
+        if (reason != null) {
+            prefs.edit()
+                .putString("source_failure_reason_${android.net.Uri.encode(url)}", reason)
+                .putLong("source_failure_time_${android.net.Uri.encode(url)}", System.currentTimeMillis())
+                .apply()
+        }
         val count = sourceFailureCount.getOrDefault(url, 0)
         sourceFailureCount[url] = count + 1
         updateSourceStats(url, isSuccess = false)
@@ -521,6 +527,9 @@ class ChannelRepository(private val context: Context) {
         sourceFailureCount[url] = 0
         updateSourceStats(url, isSuccess = true)
     }
+
+    fun getSourceLastFailure(url: String): String? =
+        prefs.getString("source_failure_reason_${android.net.Uri.encode(url)}", null)
 
     private fun updateSourceStats(url: String, isSuccess: Boolean) {
         val currentChannels = _channels.value
@@ -890,7 +899,7 @@ class ChannelRepository(private val context: Context) {
      * 東森新聞 (CH 51)、民視新聞 (CH 53)、TVBS新聞 (CH 55) 等均具備雙來源備援
      */
     private fun getBuiltInSeedChannels(): List<Channel> {
-        return listOf(
+        val seeds = listOf(
             Channel(
                 id = "seed_ftv_gen",
                 canonicalId = "ftv_gen",
@@ -1237,6 +1246,76 @@ class ChannelRepository(private val context: Context) {
                 ),
                 tvgId = "SETiNews.tw"
             )
+        )
+        val ofiiiPages = mapOf(
+            "ctv_news" to "4gtv-4gtv074",
+            "cts_main" to "4gtv-4gtv041",
+            "cts_news" to "4gtv-4gtv052",
+            "mirror_news" to "mnews",
+            "set_inews" to "iNEWS",
+            "cti_news" to "4gtv-4gtv009"
+        )
+        val augmented = seeds.map { channel ->
+            val page = ofiiiPages[channel.canonicalId]
+            if (page == null) channel else channel.copy(
+                streamSources = channel.streamSources + StreamSource(
+                    url = "https://www.ofiii.com/channel/watch/$page",
+                    type = StreamType.WEB_VIEW,
+                    label = "ofiii 官方網頁",
+                    provider = "ofiii",
+                    originLabel = "ofiii 官方觀看頁"
+                )
+            )
+        }
+        fun ofiiiChannel(key: String, number: Int, name: String, group: String, page: String) = Channel(
+            id = "seed_$key", canonicalId = key, number = number, name = name, group = group,
+            streamSources = listOf(StreamSource(
+                url = "https://www.ofiii.com/channel/watch/$page",
+                type = StreamType.WEB_VIEW, label = "ofiii 官方網頁",
+                provider = "ofiii", originLabel = "ofiii 官方觀看頁"
+            ))
+        )
+        return augmented + listOf(
+            Channel(
+                id = "seed_ctv_main", canonicalId = "ctv_main", number = 11,
+                name = "中視主頻", group = "無線綜合",
+                streamSources = listOf(StreamSource(
+                    url = "https://www.ofiii.com/channel/watch/4gtv-4gtv040",
+                    type = StreamType.WEB_VIEW, label = "ofiii 官方網頁",
+                    provider = "ofiii", originLabel = "ofiii 官方觀看頁"
+                )), tvgId = "CTV.tw"
+            ),
+            Channel(
+                id = "seed_global_taiwan", canonicalId = "global_taiwan", number = 62,
+                name = "寰宇新聞台灣台", group = "新聞時事",
+                streamSources = listOf(StreamSource(
+                    url = "https://www.ofiii.com/channel/watch/4gtv-4gtv156",
+                    type = StreamType.WEB_VIEW, label = "ofiii 官方網頁",
+                    provider = "ofiii", originLabel = "ofiii 官方觀看頁"
+                ))
+            ),
+            ofiiiChannel("global_finance", 57, "寰宇財經台", "新聞時事", "4gtv-4gtv158"),
+            ofiiiChannel("ofiii_finance", 64, "第1財經", "新聞時事", "ofiii64"),
+            ofiiiChannel("longhua_movie", 71, "龍華電影台", "電影", "litv-xinchuang03"),
+            ofiiiChannel("longhua_classic", 69, "龍華經典台", "電影", "litv-xinchuang21"),
+            ofiiiChannel("longhua_foreign", 72, "龍華洋片台", "電影", "litv-xinchuang02"),
+            ofiiiChannel("ofiii_stephen_chow", 73, "周星馳台", "電影", "ofiii73"),
+            ofiiiChannel("ofiii_movies", 74, "歐飛電影台", "電影", "ofiii74"),
+            ofiiiChannel("ofiii_golden_fans", 76, "Golden影迷台", "電影", "ofiii76"),
+            ofiiiChannel("longhua_drama", 40, "龍華戲劇台", "戲劇", "litv-xinchuang18"),
+            ofiiiChannel("longhua_japan_korea", 46, "龍華日韓台", "戲劇", "litv-xinchuang11"),
+            ofiiiChannel("ofiii_focus_drama", 48, "Focus 風采戲劇台", "戲劇", "ofiii1048"),
+            ofiiiChannel("ofiii_doraemon", 22, "哆啦Ａ夢台", "卡通兒童", "ofiii22"),
+            ofiiiChannel("ofiii_ebc_entertainment", 32, "東森娛樂台", "綜藝娛樂", "ofiii32"),
+            ofiiiChannel("ofiii_concert", 91, "演唱會直擊", "綜藝娛樂", "ofiii91"),
+            ofiiiChannel("ofiii_freeman", 95, "Freeman @台灣", "生活旅遊", "ofiii95"),
+            ofiiiChannel("ofiii_food", 96, "饕客揪愛吃", "生活旅遊", "ofiii96"),
+            ofiiiChannel("asia_travel", 34, "亞洲旅遊台", "生活旅遊", "4gtv-4gtv076"),
+            ofiiiChannel("goodtv_1", 15, "好消息", "宗教人文", "litv-ftv16"),
+            ofiiiChannel("goodtv_2", 14, "好消息2台", "宗教人文", "litv-ftv17"),
+            ofiiiChannel("ofiii_studio_classroom", 16, "空中英語教室HD頻道", "生活學習", "ofiii16"),
+            ofiiiChannel("smart_knowledge", 37, "Smart知識台", "生活學習", "litv-xinchuang19"),
+            ofiiiChannel("ofiii_focus_knowledge", 82, "Focus探索新知台", "生活學習", "ofiii82")
         )
     }
 

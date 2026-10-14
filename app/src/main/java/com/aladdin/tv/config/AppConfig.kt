@@ -18,10 +18,10 @@ object AppConfig {
     const val HTTP_READ_TIMEOUT_MS = 10000L
 
     // 晶晨 Amlogic S905X4 5GHz Wi-Fi 低延遲起播緩衝參數 (毫秒)
-    const val MIN_BUFFER_MS = 1500
-    const val MAX_BUFFER_MS = 5000
-    const val BUFFER_FOR_PLAYBACK_MS = 500
-    const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 1000
+    const val MIN_BUFFER_MS = 5000
+    const val MAX_BUFFER_MS = 15000
+    const val BUFFER_FOR_PLAYBACK_MS = 1000
+    const val BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS = 2500
 
     // 遙控器數字鍵輸入防抖超時 (毫秒)：停止按鍵後自動換台
     const val NUMBER_KEY_DEBOUNCE_MS = 1200L
@@ -79,7 +79,8 @@ object AppConfig {
 
     // YouTube 官方嵌入合規 Origin 與超時參數 (禁止偽裝成 youtube.com)
     const val YOUTUBE_APP_ORIGIN = "https://tv.aladdin.app"
-    const val YOUTUBE_BUFFERING_TIMEOUT_MS = 10_000L
+    const val NATIVE_BUFFERING_TIMEOUT_MS = 30_000L
+    const val YOUTUBE_BUFFERING_TIMEOUT_MS = 20_000L
     const val YOUTUBE_LOAD_TIMEOUT_MS = 12_000L
-    const val YOUTUBE_WEB_WATCH_TIMEOUT_MS = 15_000L
+    const val YOUTUBE_WEB_WATCH_TIMEOUT_MS = 45_000L
 }

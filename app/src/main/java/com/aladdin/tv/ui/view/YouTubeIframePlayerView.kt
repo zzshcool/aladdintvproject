@@ -101,6 +101,11 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
     fun setWebInteractionEnabled(enabled: Boolean) {
         this.isWebInteractionEnabled = enabled
+        descendantFocusability = if (enabled) {
+            android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
+        } else {
+            android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        }
         webView?.isFocusable = enabled
         webView?.isFocusableInTouchMode = enabled
         if (!enabled) {
@@ -131,7 +136,11 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
             customFullscreenView?.isFocusableInTouchMode = false
             customFullscreenView?.clearFocus()
         } else {
-            descendantFocusability = android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
+            descendantFocusability = if (isWebInteractionEnabled) {
+                android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
+            } else {
+                android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            }
             if (isWebInteractionEnabled) {
                 webView?.isFocusable = true
                 webView?.isFocusableInTouchMode = true
@@ -348,6 +357,8 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 
                 function isLiveConfirmed(video) {
                     if (!video) return false;
+                    if (video.closest('.vjs-ad-playing, .vjs-ad-loading, .ad-showing')) return false;
+                    if (video.closest('.vjs-live')) return true;
                     // 直播特徵：duration 為 Infinity 或 NaN，或時長大於 10 小時
                     if (video.duration === Infinity || isNaN(video.duration) || video.duration > 36000) {
                         return true;
@@ -357,7 +368,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                         return false;
                     }
                     // 檢查常見直播 DOM 標識
-                    const hasLiveBadge = document.querySelector('.ytp-live, [class*="live"], [aria-label*="直播"]') !== null;
+                    const hasLiveBadge = video.ownerDocument.querySelector('.ytp-live, .vjs-live-control, [aria-label*="直播"]') !== null;
                     return hasLiveBadge;
                 }
                 
@@ -404,6 +415,11 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 function onEnded() {
                     if (progressTimer) clearInterval(progressTimer);
                     advanceCount = 0;
+                    if (location.hostname.endsWith('ofiii.com') && currentVideo &&
+                        !isLiveConfirmed(currentVideo)) {
+                        cleanupListeners();
+                        return;
+                    }
                     AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 0, currentVideo ? currentVideo.currentTime || 0 : 0);
                 }
                 function onError() {
@@ -415,6 +431,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     if (!video || video === currentVideo) return;
                     cleanupListeners();
                     currentVideo = video;
+                    window.aladdinPlaybackVideo = video;
                     
                     video.addEventListener('playing', onPlaying);
                     video.addEventListener('waiting', onWaiting);
@@ -436,7 +453,34 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 }
                 
                 function scanAndBind() {
-                    const videos = document.querySelectorAll('video');
+                    if (location.hostname === 'ofiii.com' || location.hostname.endsWith('.ofiii.com')) {
+                        const section = document.querySelector('.player_section');
+                        if (section && !document.getElementById('aladdin-ofiii-player-layout')) {
+                            const style = document.createElement('style');
+                            style.id = 'aladdin-ofiii-player-layout';
+                            style.textContent = 'html,body{margin:0!important;overflow:hidden!important;}' +
+                                'header.header,footer{display:none!important;}' +
+                                '.player_section{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;background:#000!important;z-index:10!important;}' +
+                                '.player_section iframe{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;border:0!important;}' +
+                                '.player_section video.thumbnail{width:100%!important;height:100%!important;object-fit:contain!important;}';
+                            document.head.appendChild(style);
+                            for (let parent = section.parentElement; parent; parent = parent.parentElement) {
+                                parent.style.setProperty('transform', 'none', 'important');
+                                parent.style.setProperty('contain', 'none', 'important');
+                                parent.style.setProperty('overflow', 'visible', 'important');
+                            }
+                        }
+                    }
+                    const docs = [document];
+                    document.querySelectorAll('iframe').forEach(function(frame) {
+                        try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch(e) {}
+                    });
+                    const videos = docs.flatMap(function(doc) {
+                        return Array.from(doc.querySelectorAll('video')).filter(function(v) {
+                            return !v.classList.contains('thumbnail') &&
+                                (v.currentSrc || v.getAttribute('src') || v.querySelector('source'));
+                        });
+                    });
                     if (videos.length > 0) {
                         let candidate = videos[0];
                         for (let i = 0; i < videos.length; i++) {
@@ -448,6 +492,8 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                         bindVideoElement(candidate);
                         return true;
                     }
+                    return false;
+                }
                 function checkAdAndLogin() {
                     try {
                         const isAd = !!(document.querySelector('.ad-showing') || document.querySelector('.video-ads') || document.querySelector('.ytp-ad-player-overlay'));
@@ -468,6 +514,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
                 scanAndBind();
                 checkAdAndLogin();
+                setInterval(function() { scanAndBind(); checkAdAndLogin(); }, 1000);
                 
                 // MutationObserver 監測 video 元素替換 (如廣告切換至正片直播)
                 try {
@@ -500,8 +547,10 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
             webView?.evaluateJavascript(
                 """
                 (function() {
-                    const v = document.querySelector('video');
-                    if (v) { v.play(); }
+                    const entry = document.querySelector('.player_section .play_icon');
+                    if (entry && !window.aladdinPlaybackVideo) { entry.parentElement.click(); return; }
+                    const v = window.aladdinPlaybackVideo || document.querySelector('video:not(.thumbnail)');
+                    if (v) { v.play().catch(function() {}); }
                     const btn = document.querySelector('.ytp-play-button') || 
                                 document.querySelector('button[aria-label*="Play"]') || 
                                 document.querySelector('button[aria-label*="播放"]');
@@ -522,7 +571,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
         webView?.let { wv ->
             try {
                 wv.evaluateJavascript(
-                    "if (window.player && player.stopVideo) { player.stopVideo(); } const v = document.querySelector('video'); if (v) { v.pause(); v.src = ''; }",
+                    "if (window.player && player.stopVideo) { player.stopVideo(); } const v = window.aladdinPlaybackVideo || document.querySelector('video:not(.thumbnail)'); if (v) { v.pause(); }",
                     null
                 )
             } catch (_: Exception) {}
@@ -536,7 +585,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
         if (attempt.playMode == PlayMode.IFRAME) {
             webView?.evaluateJavascript("if (window.player && player.pauseVideo) { player.pauseVideo(); }", null)
         } else {
-            webView?.evaluateJavascript("const v = document.querySelector('video'); if (v) { v.pause(); }", null)
+            webView?.evaluateJavascript("const v = window.aladdinPlaybackVideo || document.querySelector('video:not(.thumbnail)'); if (v) { v.pause(); }", null)
         }
     }
 
@@ -545,7 +594,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
         if (attempt.playMode == PlayMode.IFRAME) {
             webView?.evaluateJavascript("if (window.player && player.playVideo) { player.playVideo(); }", null)
         } else {
-            webView?.evaluateJavascript("const v = document.querySelector('video'); if (v) { v.play(); }", null)
+            webView?.evaluateJavascript("const v = window.aladdinPlaybackVideo || document.querySelector('video:not(.thumbnail)'); if (v) { v.play().catch(function() {}); }", null)
         }
     }
 

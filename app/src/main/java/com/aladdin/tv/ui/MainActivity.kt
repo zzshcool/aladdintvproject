@@ -200,7 +200,7 @@ class MainActivity : AppCompatActivity() {
         playerManager.onExoPlayerSourceFailed = { channel, sourceIndex, sessionToken, reason ->
             if (sessionToken == currentSessionToken) {
                 val failedUrl = channel.streamSources.getOrNull(sourceIndex)?.url ?: ""
-                repository.recordSourceFailure(failedUrl)
+                repository.recordSourceFailure(failedUrl, reason)
                 lastDiagRawErrorCode = "ExoPlayer 播放異常"
                 lastDiagAttemptResult = "嘗試失敗: $reason"
                 lastDiagVerificationTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -232,6 +232,49 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnOpenSettings.setOnClickListener {
+            hideDrawer()
+            showSettingsPanel()
+        }
+        binding.layoutTouchControls.isVisible = packageManager.hasSystemFeature(
+            android.content.pm.PackageManager.FEATURE_TOUCHSCREEN
+        )
+        if (binding.layoutTouchControls.isVisible) {
+            for (list in listOf(binding.rvChannels, binding.rvStreamSources)) {
+                list.addOnChildAttachStateChangeListener(object : androidx.recyclerview.widget.RecyclerView.OnChildAttachStateChangeListener {
+                    override fun onChildViewAttachedToWindow(view: View) {
+                        view.isFocusableInTouchMode = false
+                    }
+                    override fun onChildViewDetachedFromWindow(view: View) = Unit
+                })
+            }
+        }
+        binding.btnTouchChannels.setOnClickListener {
+            exitWebInteraction()
+            hideSourceSelectionPanel()
+            hideSettingsPanel()
+            showDrawer()
+        }
+        binding.btnTouchSources.setOnClickListener {
+            exitWebInteraction()
+            showSourceSelectionPanel()
+        }
+        binding.btnTouchExit.setOnClickListener {
+            playerManager.stop()
+            binding.youtubePlayerView.stopAndClear()
+            finish()
+        }
+        binding.btnTouchWeb.setOnClickListener {
+            if (binding.youtubePlayerView.isVisible) {
+                hideDrawer()
+                hideSettingsPanel()
+                hideSourceSelectionPanel()
+                if (binding.youtubePlayerView.isWebInteractionEnabled()) exitWebInteraction()
+                else enterWebInteraction()
+            }
+        }
+        binding.btnTouchSettings.setOnClickListener {
+            exitWebInteraction()
+            hideSourceSelectionPanel()
             hideDrawer()
             showSettingsPanel()
         }
@@ -701,6 +744,11 @@ class MainActivity : AppCompatActivity() {
         binding.tvDiagQualityStrategy.text = qualityStrategyText
 
         binding.tvDiagResult.text = "結果：$lastDiagAttemptResult\n錯誤碼：$lastDiagRawErrorCode\n最後驗證：$lastDiagVerificationTime | 成功：$lastDiagSuccessTime"
+        currentPlayingChannel?.currentSource?.url?.let { url ->
+            repository.getSourceLastFailure(url)?.let { reason ->
+                binding.tvDiagResult.append("\n此線路最近失敗：$reason")
+            }
+        }
     }
 
     private fun startHealthExpiryScanner() {
@@ -856,6 +904,8 @@ class MainActivity : AppCompatActivity() {
         // 切台重置：恢復 TV_APP 控制模式，隱藏所有錯誤浮層，鎖定電視盒根焦點
         currentControlMode = TvControlMode.TV_APP
         binding.layoutWebInteractionBanner.isVisible = false
+        binding.youtubePlayerView.setWebInteractionEnabled(false)
+        binding.youtubePlayerView.setFocusIsolationEnabled(true)
         binding.layoutError.isVisible = false
         binding.layoutYoutubeError.isVisible = false
         binding.rootContainer.requestFocus()
@@ -949,13 +999,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun startBufferingWatchdog(channel: Channel?, attemptId: Long) {
         if (channel == null) return
+        val timeoutMs = when (channel.currentSource?.type) {
+            StreamType.HLS -> AppConfig.NATIVE_BUFFERING_TIMEOUT_MS
+            StreamType.WEB_VIEW -> AppConfig.YOUTUBE_WEB_WATCH_TIMEOUT_MS
+            else -> AppConfig.YOUTUBE_BUFFERING_TIMEOUT_MS
+        }
         bufferingWatchdogJob?.cancel()
         bufferingWatchdogJob = lifecycleScope.launch {
-            delay(AppConfig.YOUTUBE_BUFFERING_TIMEOUT_MS)
+            delay(timeoutMs)
             if (currentAttemptId == attemptId) {
+                if (channel.currentSource?.type == StreamType.HLS &&
+                    playerManager.playerState.value == PlayerState.Playing) return@launch
                 val url = channel.currentSource?.url ?: ""
                 if (url.isNotBlank()) {
-                    repository.recordSourceFailure(url)
+                    repository.recordSourceFailure(url, "緩衝逾時")
                 }
                 val timeoutMsg = getString(R.string.youtube_error_timeout)
                 if (repository.isAutoFallbackEnabled()) {
@@ -1030,6 +1087,10 @@ class MainActivity : AppCompatActivity() {
      */
     private fun triggerNextFallback(channel: Channel, attemptId: Long, reason: String) {
         if (attemptId != currentAttemptId) return
+        if (!repository.isAutoFallbackEnabled()) {
+            showManualPlaybackError(channel, reason)
+            return
+        }
 
         bufferingWatchdogJob?.cancel()
         ytStablePlaybackJob?.cancel()
@@ -1296,6 +1357,11 @@ class MainActivity : AppCompatActivity() {
             return super.dispatchKeyEvent(event)
         }
 
+        if (currentControlMode == TvControlMode.WEB_INTERACTION &&
+            !binding.layoutYoutubeError.isVisible && !binding.layoutError.isVisible) {
+            return super.dispatchKeyEvent(event)
+        }
+
         // E. 核心換台鍵：最高特權！
         // 無論目前是正常播放、緩衝中、黑畫面、YouTube 錯誤 (150/地區限制) 還是 ExoPlayer 錯誤，
         // 只要抽屜/線路清單未開啟，按下上下鍵一律立刻切台！絕不被任何錯誤浮層或 WebView 阻擋！
@@ -1336,7 +1402,6 @@ class MainActivity : AppCompatActivity() {
                         return super.dispatchKeyEvent(event)
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        consumedDownKeyCodes.add(keyCode)
                         return super.dispatchKeyEvent(event)
                     }
                 }

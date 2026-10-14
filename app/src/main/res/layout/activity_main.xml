@@ -10,6 +10,23 @@
     android:focusableInTouchMode="true"
     android:keepScreenOn="true">
 
+    <LinearLayout
+        android:id="@+id/layoutTouchControls"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:background="@color/black"
+        android:orientation="horizontal"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <Button android:id="@+id/btnTouchChannels" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_channels" />
+        <Button android:id="@+id/btnTouchSources" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_sources" />
+        <Button android:id="@+id/btnTouchSettings" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_settings" />
+        <Button android:id="@+id/btnTouchExit" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_exit" />
+        <Button android:id="@+id/btnTouchWeb" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_web" />
+    </LinearLayout>
+
     <!-- 1. 全螢幕 Media3 播放器 (ExoPlayer 解碼 HLS/MP4/TS) -->
     <androidx.media3.ui.PlayerView
         android:id="@+id/playerView"
@@ -18,7 +35,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/layoutTouchControls"
         app:resize_mode="fit"
         app:surface_type="surface_view"
         app:use_controller="false" />
@@ -32,7 +49,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toBottomOf="@id/layoutTouchControls" />
 
     <!-- 3. YouTube 內嵌播放錯誤提示與切台引導浮層 -->
     <LinearLayout
