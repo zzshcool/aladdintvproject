@@ -54,6 +54,118 @@ class ChannelRepository(private val context: Context) {
     private val checkSemaphore = Semaphore(AppConfig.HEALTH_CHECK_CONCURRENCY)
     private val sourceFailureCount = mutableMapOf<String, Int>()
 
+    /**
+     * 本次實機全線路確認失效之頻道排除集合
+     * 確保快取重構、本機開機載入、內建種子與遠端更新時均穩定排除，不重新出現
+     */
+    private val EXCLUDED_DEFUNCT_CHANNELS = setOf(
+        "ctivariety.tw@sd",
+        "daai2.tw@sd",
+        "ftv_gen",
+        "good2.tw@sd",
+        "goodtv.tw@sd",
+        "cts_main",
+        "pts_main",
+        "pts_taiwan",
+        "smart_knowledge",
+        "longhua_drama",
+        "longhua_japan_korea",
+        "ofiii_focus_drama",
+        "global_taiwan",
+        "ofiii_finance",
+        "ctv_main",
+        "longhua_classic",
+        "global_finance",
+        "longhua_movie",
+        "longhua_foreign",
+        "ofiii_stephen_chow",
+        "ofiii_movies",
+        "ofiii_doraemon",
+        "ofiii_golden_fans",
+        "ofiii_ebc_entertainment",
+        "asia_travel",
+        "goodtv_1",
+        "goodtv_2",
+        "ofiii_studio_classroom",
+        "ofiii_focus_knowledge",
+        "ofiii_concert",
+        "ofiii_freeman",
+        "ofiii_food"
+    )
+
+    private fun isDefunctExcludedChannel(channel: Channel): Boolean {
+        val canon = channel.canonicalId.trim().lowercase().removePrefix("canon_").removePrefix("tvg_")
+        val rawId = channel.id.trim().lowercase().removePrefix("ch_").removePrefix("seed_")
+        val tvg = channel.tvgId?.trim()?.lowercase() ?: ""
+        val name = channel.name.trim().lowercase()
+
+        // 排除 GOOD TV 專題短片頻道群
+        val isGoodTvSeries = canon.startsWith("name_goodtvch") ||
+                rawId.startsWith("name_goodtvch") ||
+                name.contains("good tv ch") ||
+                name.startsWith("good tv") ||
+                channel.streamSources.any { it.url.contains("live.streamingfast.net/osmflivech") }
+
+        return isGoodTvSeries ||
+               EXCLUDED_DEFUNCT_CHANNELS.contains(canon) ||
+               EXCLUDED_DEFUNCT_CHANNELS.contains(rawId) ||
+               (tvg.isNotEmpty() && EXCLUDED_DEFUNCT_CHANNELS.contains(tvg))
+    }
+
+    private val ytLiveCache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
+    private val YT_CACHE_DURATION_MS = 60 * 60 * 1000L // 1 小時快取
+
+    /**
+     * 動態 YouTube 直播解析：透過頻道 handle (例如 @newsebc) 追蹤 /live 取得即時 Video ID
+     */
+    suspend fun resolveYouTubeLiveVideoId(handle: String): String? = withContext(Dispatchers.IO) {
+        val cleanHandle = handle.trim()
+        if (cleanHandle.isBlank()) return@withContext null
+        val now = System.currentTimeMillis()
+        val cached = ytLiveCache[cleanHandle]
+        if (cached != null && (now - cached.second) < YT_CACHE_DURATION_MS) {
+            return@withContext cached.first
+        }
+        try {
+            val encoded = if (cleanHandle.startsWith("@")) {
+                "@" + java.net.URLEncoder.encode(cleanHandle.substring(1), "UTF-8")
+            } else {
+                java.net.URLEncoder.encode(cleanHandle, "UTF-8")
+            }
+            val targetUrl = "https://www.youtube.com/$encoded/live"
+            val request = Request.Builder()
+                .url(targetUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("Accept-Language", "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7")
+                .build()
+            okHttpClient.newCall(request).execute().use { response ->
+                val finalUrl = response.request.url.toString()
+                val urlMatch = Regex("""watch\?v=([a-zA-Z0-9_-]{11})""").find(finalUrl)
+                if (urlMatch != null) {
+                    val vid = urlMatch.groupValues[1]
+                    ytLiveCache[cleanHandle] = Pair(vid, now)
+                    return@withContext vid
+                }
+                val body = response.body?.string().orEmpty()
+                val canonMatch = Regex("""<link\s+rel="canonical"\s+href="https://www\.youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})">""").find(body)
+                if (canonMatch != null) {
+                    val vid = canonMatch.groupValues[1]
+                    ytLiveCache[cleanHandle] = Pair(vid, now)
+                    return@withContext vid
+                }
+                val jsonVidMatch = Regex(""""videoId":"([a-zA-Z0-9_-]{11})"""").find(body)
+                if (jsonVidMatch != null) {
+                    val vid = jsonVidMatch.groupValues[1]
+                    ytLiveCache[cleanHandle] = Pair(vid, now)
+                    return@withContext vid
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return@withContext null
+    }
+
+
     private data class CanonicalChannelRule(
         val canonicalId: String,
         val defaultNumber: Int,
@@ -199,6 +311,62 @@ class ChannelRepository(private val context: Context) {
             group = "財經新聞",
             tvgIds = listOf("SETiNews.tw", "setinews.tw"),
             nameAliases = listOf("三立財經inews", "三立財經", "set inews", "setinews", "三立新聞財經", "三立財經台")
+        ),
+        CanonicalChannelRule(
+            canonicalId = "ntd_news",
+            defaultNumber = 12,
+            canonicalName = "新唐人亞太台",
+            group = "新聞時事",
+            tvgIds = listOf("NTDAPTV.tw", "ntdaptv.tw"),
+            nameAliases = listOf("新唐人", "新唐人亞太", "新唐人亞太台", "新唐人電視台")
+        ),
+        CanonicalChannelRule(
+            canonicalId = "pts_news",
+            defaultNumber = 13,
+            canonicalName = "公視新聞網",
+            group = "公共電視",
+            tvgIds = listOf("PNNPTS.tw", "pnntvs.tw"),
+            nameAliases = listOf("公視新聞", "公視新聞網", "pnn", "公視網路直播")
+        ),
+        CanonicalChannelRule(
+            canonicalId = "momo_shop2",
+            defaultNumber = 35,
+            canonicalName = "momo購物2台",
+            group = "生活購物",
+            tvgIds = listOf("Momo2.tw", "momo2.tw"),
+            nameAliases = listOf("momo2", "momo購物2台", "momo購物二台", "momo 2")
+        ),
+        CanonicalChannelRule(
+            canonicalId = "taiwan_plus",
+            defaultNumber = 38,
+            canonicalName = "TaiwanPlus",
+            group = "國際新聞",
+            tvgIds = listOf("TaiwanPlus.tw", "taiwanplus.tw"),
+            nameAliases = listOf("taiwanplus", "taiwan plus")
+        ),
+        CanonicalChannelRule(
+            canonicalId = "ebc_shop",
+            defaultNumber = 47,
+            canonicalName = "東森購物台",
+            group = "生活購物",
+            tvgIds = listOf("EBCShop.tw", "ebcshop.tw"),
+            nameAliases = listOf("東森購物", "東森購物台", "東森購物1台", "東森購物一台")
+        ),
+        CanonicalChannelRule(
+            canonicalId = "muse_anime",
+            defaultNumber = 70,
+            canonicalName = "Muse木棉花動漫",
+            group = "卡通動漫",
+            tvgIds = listOf("MuseAnime.tw", "museanime.tw"),
+            nameAliases = listOf("木棉花", "木棉花動漫", "muse動漫", "muse木棉花")
+        ),
+        CanonicalChannelRule(
+            canonicalId = "rock_music",
+            defaultNumber = 90,
+            canonicalName = "滾石音樂24H",
+            group = "音樂娛樂",
+            tvgIds = listOf("RockMusic.tw", "rockmusic.tw"),
+            nameAliases = listOf("滾石唱片", "滾石音樂", "滾石24h", "rock records")
         )
     )
 
@@ -448,8 +616,9 @@ class ChannelRepository(private val context: Context) {
             }
         }
 
-        // 重新分配嚴格唯一、確定性之頻道台號，不更動頻道 ID
-        return assignUniqueChannelNumbers(uniqueMap.values.toList())
+        // 重新分配嚴格唯一、確定性之頻道台號，不更動頻道 ID，並排除所有線路確認失效之頻道
+        val filtered = uniqueMap.values.filterNot { isDefunctExcludedChannel(it) }
+        return assignUniqueChannelNumbers(filtered)
     }
 
     /**
@@ -698,12 +867,12 @@ class ChannelRepository(private val context: Context) {
 
     private fun readFromCache(): List<Channel> {
         // 1. 優先嘗試讀取 V2 JSON 快取
-        val listV2 = parseCacheFile(cacheFileV2)
+        val listV2 = parseCacheFile(cacheFileV2).filterNot { isDefunctExcludedChannel(it) }
         if (listV2.isNotEmpty()) return listV2
 
         // 2. 若主快取異常，嘗試讀取 .bak 備份快取
         val bakFile = File(context.filesDir, "${AppConfig.CACHE_FILE_NAME_V2}.bak")
-        val listBak = parseCacheFile(bakFile)
+        val listBak = parseCacheFile(bakFile).filterNot { isDefunctExcludedChannel(it) }
         if (listBak.isNotEmpty()) return listBak
 
         // 3. 舊版 M3U 快取遷移相容
@@ -901,25 +1070,6 @@ class ChannelRepository(private val context: Context) {
     private fun getBuiltInSeedChannels(): List<Channel> {
         val seeds = listOf(
             Channel(
-                id = "seed_ftv_gen",
-                canonicalId = "ftv_gen",
-                number = 6,
-                name = "民視綜合台",
-                group = "無線綜合",
-                streamSources = listOf(
-                    StreamSource(
-                        url = "https://litv-pc-live-01.cdn.hinet.net/live/ch01/index.m3u8",
-                        type = StreamType.HLS,
-                        label = "1080P",
-                        tvgId = "FTV.tw",
-                        isGeoBlocked = true,
-                        originLabel = "HiNet CDN"
-                    )
-                ),
-                tvgId = "FTV.tw",
-                isGeoBlocked = true
-            ),
-            Channel(
                 id = "seed_daai_1",
                 canonicalId = "daai_1",
                 number = 9,
@@ -927,10 +1077,11 @@ class ChannelRepository(private val context: Context) {
                 group = "宗教文化",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=oV_i3Hsl_zg",
+                        url = "https://www.youtube.com/@DaAiWorldNews/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "oV_i3Hsl_zg",
-                        label = "官方YouTube",
+                        youtubeVideoId = "S-IRquSID3g",
+                        liveChannelHandle = "@DaAiWorldNews",
+                        label = "YouTube官方 24H",
                         tvgId = "DaAi1.tw",
                         originLabel = "YouTube官方直播"
                     )
@@ -945,73 +1096,54 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://litv-pc-live-01.cdn.hinet.net/live/ch04/index.m3u8",
-                        type = StreamType.HLS,
-                        label = "1080P",
+                        url = "https://www.youtube.com/@chinatv_news/live",
+                        type = StreamType.YOUTUBE,
+                        youtubeVideoId = "5n0y6b0Q25o",
+                        liveChannelHandle = "@chinatv_news",
+                        label = "YouTube官方 24H",
                         tvgId = "CTVNews.tw",
-                        isGeoBlocked = true,
-                        originLabel = "HiNet CDN"
+                        originLabel = "YouTube官方直播"
                     )
                 ),
-                tvgId = "CTVNews.tw",
-                isGeoBlocked = true
+                tvgId = "CTVNews.tw"
             ),
             Channel(
-                id = "seed_cts_main",
-                canonicalId = "cts_main",
+                id = "seed_ntd_news",
+                canonicalId = "ntd_news",
                 number = 12,
-                name = "華視主頻",
-                group = "無線綜合",
+                name = "新唐人亞太台",
+                group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://litv-pc-live-01.cdn.hinet.net/live/ch06/index.m3u8",
-                        type = StreamType.HLS,
-                        label = "1080P",
-                        tvgId = "CTS.tw",
-                        isGeoBlocked = true,
-                        originLabel = "HiNet CDN"
+                        url = "https://www.youtube.com/@NTDAPTV/live",
+                        type = StreamType.YOUTUBE,
+                        youtubeVideoId = "Bhp_V7H5QoY",
+                        liveChannelHandle = "@NTDAPTV",
+                        label = "YouTube官方 24H",
+                        tvgId = "NTDAPTV.tw",
+                        originLabel = "YouTube官方直播"
                     )
                 ),
-                tvgId = "CTS.tw",
-                isGeoBlocked = true
+                tvgId = "NTDAPTV.tw"
             ),
             Channel(
-                id = "seed_pts_main",
-                canonicalId = "pts_main",
+                id = "seed_pts_news",
+                canonicalId = "pts_news",
                 number = 13,
-                name = "公視主頻",
+                name = "公視新聞網",
                 group = "公共電視",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://litv-pc-live-01.cdn.hinet.net/live/ch07/index.m3u8",
-                        type = StreamType.HLS,
-                        label = "1080P",
-                        tvgId = "PTS.tw",
-                        isGeoBlocked = true,
-                        originLabel = "HiNet CDN"
+                        url = "https://www.youtube.com/@PNNPTS/live",
+                        type = StreamType.YOUTUBE,
+                        youtubeVideoId = "quwqlazU-c8",
+                        liveChannelHandle = "@PNNPTS",
+                        label = "YouTube官方 24H",
+                        tvgId = "PNNPTS.tw",
+                        originLabel = "YouTube官方直播"
                     )
                 ),
-                tvgId = "PTS.tw",
-                isGeoBlocked = true
-            ),
-            Channel(
-                id = "seed_pts_taiwan",
-                canonicalId = "pts_taiwan",
-                number = 14,
-                name = "公視台語台",
-                group = "公共電視",
-                streamSources = listOf(
-                    StreamSource(
-                        url = "https://litv-pc-live-01.cdn.hinet.net/live/ch08/index.m3u8",
-                        type = StreamType.HLS,
-                        label = "1080P",
-                        tvgId = "PTSTaigi.tw",
-                        isGeoBlocked = true,
-                        originLabel = "HiNet CDN"
-                    )
-                ),
-                tvgId = "PTSTaigi.tw",
-                isGeoBlocked = true
+                tvgId = "PNNPTS.tw"
             ),
             Channel(
                 id = "seed_ttv_news",
@@ -1021,10 +1153,11 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=JAzRXylm3M0",
+                        url = "https://www.youtube.com/@ttvnews_taiwan/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "JAzRXylm3M0",
-                        label = "官方YouTube 24H",
+                        youtubeVideoId = "pF507BLtbqU",
+                        liveChannelHandle = "@ttvnews_taiwan",
+                        label = "YouTube官方 24H",
                         tvgId = "TTVNews.tw",
                         originLabel = "YouTube官方直播"
                     )
@@ -1049,6 +1182,63 @@ class ChannelRepository(private val context: Context) {
                 tvgId = "IndigenousTV.tw"
             ),
             Channel(
+                id = "seed_momo_shop2",
+                canonicalId = "momo_shop2",
+                number = 35,
+                name = "momo購物2台",
+                group = "生活購物",
+                streamSources = listOf(
+                    StreamSource(
+                        url = "https://www.youtube.com/@momoch3571/live",
+                        type = StreamType.YOUTUBE,
+                        youtubeVideoId = "momoch3571",
+                        liveChannelHandle = "@momoch3571",
+                        label = "YouTube官方 24H",
+                        tvgId = "Momo2.tw",
+                        originLabel = "YouTube官方直播"
+                    )
+                ),
+                tvgId = "Momo2.tw"
+            ),
+            Channel(
+                id = "seed_taiwan_plus",
+                canonicalId = "taiwan_plus",
+                number = 38,
+                name = "TaiwanPlus",
+                group = "國際新聞",
+                streamSources = listOf(
+                    StreamSource(
+                        url = "https://www.youtube.com/@TaiwanPlusNews/live",
+                        type = StreamType.YOUTUBE,
+                        youtubeVideoId = "nT__fkHXsvE",
+                        liveChannelHandle = "@TaiwanPlusNews",
+                        label = "YouTube官方 24H",
+                        tvgId = "TaiwanPlus.tw",
+                        originLabel = "YouTube官方直播"
+                    )
+                ),
+                tvgId = "TaiwanPlus.tw"
+            ),
+            Channel(
+                id = "seed_ebc_shop",
+                canonicalId = "ebc_shop",
+                number = 47,
+                name = "東森購物台",
+                group = "生活購物",
+                streamSources = listOf(
+                    StreamSource(
+                        url = "https://www.youtube.com/@HotsaleTV/live",
+                        type = StreamType.YOUTUBE,
+                        youtubeVideoId = "HotsaleTV",
+                        liveChannelHandle = "@HotsaleTV",
+                        label = "YouTube官方 24H",
+                        tvgId = "EBCShop.tw",
+                        originLabel = "YouTube官方直播"
+                    )
+                ),
+                tvgId = "EBCShop.tw"
+            ),
+            Channel(
                 id = "seed_ebc_news",
                 canonicalId = "ebc_news",
                 number = 51,
@@ -1056,17 +1246,10 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://litv-pc-live-01.cdn.hinet.net/live/ch09/index.m3u8",
-                        type = StreamType.HLS,
-                        label = "1080P",
-                        tvgId = "EBCNews.tw",
-                        isGeoBlocked = true,
-                        originLabel = "HiNet CDN"
-                    ),
-                    StreamSource(
-                        url = "https://www.youtube.com/watch?v=V1p33hqPrUk",
+                        url = "https://www.youtube.com/@newsebc/live",
                         type = StreamType.YOUTUBE,
                         youtubeVideoId = "V1p33hqPrUk",
+                        liveChannelHandle = "@newsebc",
                         label = "官方YouTube 24H",
                         tvgId = "EBCNews.tw",
                         originLabel = "YouTube官方直播"
@@ -1082,9 +1265,10 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=wM0g8EoUZ_E",
+                        url = "https://www.youtube.com/@CtsTw/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "wM0g8EoUZ_E",
+                        youtubeVideoId = "KMMHw8rllic",
+                        liveChannelHandle = "@CtsTw",
                         label = "官方YouTube 24H",
                         tvgId = "CTSNews.tw",
                         originLabel = "YouTube官方直播"
@@ -1100,17 +1284,10 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://litv-pc-live-01.cdn.hinet.net/live/ch02/index.m3u8",
-                        type = StreamType.HLS,
-                        label = "1080P",
-                        tvgId = "FTVNews.tw",
-                        isGeoBlocked = true,
-                        originLabel = "HiNet CDN"
-                    ),
-                    StreamSource(
-                        url = "https://www.youtube.com/watch?v=ylYJSBUgaMA",
+                        url = "https://www.youtube.com/@FTV_News/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "ylYJSBUgaMA",
+                        youtubeVideoId = "iGMj2iyL--s",
+                        liveChannelHandle = "@FTV_News",
                         label = "官方YouTube 24H",
                         tvgId = "FTVNews.tw",
                         originLabel = "YouTube官方直播"
@@ -1126,21 +1303,14 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=yeYC0mbSIOo",
+                        url = "https://www.youtube.com/@setn/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "yeYC0mbSIOo",
+                        youtubeVideoId = "qGySalbSJfU",
+                        liveChannelHandle = "@setn",
                         label = "官方YouTube 24H",
                         provider = "seed",
                         tvgId = "SETNews.tw",
                         originLabel = "YouTube官方直播"
-                    ),
-                    StreamSource(
-                        url = "https://www.ofiii.com/channel/watch/setnews",
-                        type = StreamType.WEB_VIEW,
-                        label = "ofiii 官方網頁",
-                        provider = "ofiii",
-                        tvgId = "SETNews.tw",
-                        originLabel = "ofiii 官方觀看頁"
                     )
                 ),
                 tvgId = "SETNews.tw"
@@ -1153,26 +1323,16 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=2mCSYvcfhtc",
+                        url = "https://www.youtube.com/@TVBSNEWS01/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "2mCSYvcfhtc",
-                        label = "YouTube官方 (海外IP限定)",
+                        youtubeVideoId = "oM3M7yuwNn8",
+                        liveChannelHandle = "@TVBSNEWS01",
+                        label = "YouTube官方 24H",
                         tvgId = "TVBSNews.tw",
-                        isGeoBlocked = true,
                         originLabel = "YouTube官方直播"
-                    ),
-                    StreamSource(
-                        url = "https://www.youtube.com/watch?v=m_dhMSvUCIc",
-                        type = StreamType.YOUTUBE,
-                        youtubeVideoId = "m_dhMSvUCIc",
-                        label = "YouTube備用 (海外IP限定)",
-                        tvgId = "TVBSNews.tw",
-                        isGeoBlocked = true,
-                        originLabel = "YouTube備用線路"
                     )
                 ),
-                tvgId = "TVBSNews.tw",
-                isGeoBlocked = true
+                tvgId = "TVBSNews.tw"
             ),
             Channel(
                 id = "seed_cti_news",
@@ -1182,9 +1342,10 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=vr3XyVCR4T0",
+                        url = "https://www.youtube.com/@ctitvnews/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "vr3XyVCR4T0",
+                        youtubeVideoId = "-rP6YXm-Xb8",
+                        liveChannelHandle = "@ctitvnews",
                         label = "官方YouTube 24H",
                         tvgId = "CTiNews.tw",
                         originLabel = "YouTube官方直播"
@@ -1200,15 +1361,35 @@ class ChannelRepository(private val context: Context) {
                 group = "財經新聞",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=AEBeWMM1atA",
+                        url = "https://www.youtube.com/@57ETFN/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "AEBeWMM1atA",
+                        youtubeVideoId = "1I2iq41Akmo",
+                        liveChannelHandle = "@57ETFN",
                         label = "官方YouTube 24H",
                         tvgId = "EBCFinancialNews.tw",
                         originLabel = "YouTube官方直播"
                     )
                 ),
                 tvgId = "EBCFinancialNews.tw"
+            ),
+            Channel(
+                id = "seed_muse_anime",
+                canonicalId = "muse_anime",
+                number = 70,
+                name = "Muse木棉花動漫",
+                group = "卡通動漫",
+                streamSources = listOf(
+                    StreamSource(
+                        url = "https://www.youtube.com/@MuseTW/live",
+                        type = StreamType.YOUTUBE,
+                        youtubeVideoId = "JjtDSypFLDk",
+                        liveChannelHandle = "@MuseTW",
+                        label = "官方YouTube 24H",
+                        tvgId = "MuseAnime.tw",
+                        originLabel = "YouTube官方直播"
+                    )
+                ),
+                tvgId = "MuseAnime.tw"
             ),
             Channel(
                 id = "seed_mirror_news",
@@ -1218,9 +1399,10 @@ class ChannelRepository(private val context: Context) {
                 group = "新聞時事",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=5n0y6b0Q25o",
+                        url = "https://www.youtube.com/@mlive-tw/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "5n0y6b0Q25o",
+                        youtubeVideoId = "vylit7WPgeA",
+                        liveChannelHandle = "@mlive-tw",
                         label = "官方YouTube 24H",
                         tvgId = "MirrorNews.tw",
                         originLabel = "YouTube官方直播"
@@ -1236,15 +1418,35 @@ class ChannelRepository(private val context: Context) {
                 group = "財經新聞",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/watch?v=FoBfXvlOR6I",
+                        url = "https://www.youtube.com/@setinews/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "FoBfXvlOR6I",
-                        label = "官方YouTube",
+                        youtubeVideoId = "CKjS4477pnU",
+                        liveChannelHandle = "@setinews",
+                        label = "官方YouTube 24H",
                         tvgId = "SETiNews.tw",
                         originLabel = "YouTube官方直播"
                     )
                 ),
                 tvgId = "SETiNews.tw"
+            ),
+            Channel(
+                id = "seed_rock_music",
+                canonicalId = "rock_music",
+                number = 90,
+                name = "滾石音樂24H",
+                group = "音樂娛樂",
+                streamSources = listOf(
+                    StreamSource(
+                        url = "https://www.youtube.com/@rockrecords/live",
+                        type = StreamType.YOUTUBE,
+                        youtubeVideoId = "JtrfTWBfrvQ",
+                        liveChannelHandle = "@rockrecords",
+                        label = "官方YouTube 24H",
+                        tvgId = "RockMusic.tw",
+                        originLabel = "YouTube官方直播"
+                    )
+                ),
+                tvgId = "RockMusic.tw"
             )
         )
         val ofiiiPages = mapOf(
@@ -1275,7 +1477,7 @@ class ChannelRepository(private val context: Context) {
                 provider = "ofiii", originLabel = "ofiii 官方觀看頁"
             ))
         )
-        return augmented + listOf(
+        val allSeeds = augmented + listOf(
             Channel(
                 id = "seed_ctv_main", canonicalId = "ctv_main", number = 11,
                 name = "中視主頻", group = "無線綜合",
@@ -1317,6 +1519,7 @@ class ChannelRepository(private val context: Context) {
             ofiiiChannel("smart_knowledge", 37, "Smart知識台", "生活學習", "litv-xinchuang19"),
             ofiiiChannel("ofiii_focus_knowledge", 82, "Focus探索新知台", "生活學習", "ofiii82")
         )
+        return allSeeds.filterNot { isDefunctExcludedChannel(it) }
     }
 
     private fun channelsToM3u(channels: List<Channel>): String {

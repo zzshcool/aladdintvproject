@@ -30,6 +30,7 @@ data class StreamSource(
     val url: String,
     val type: StreamType = StreamType.HLS,
     val youtubeVideoId: String? = null,
+    val liveChannelHandle: String? = null,
     val label: String? = null,
     val tvgId: String? = null,
     val isGeoBlocked: Boolean = false,
@@ -71,6 +72,7 @@ data class StreamSource(
         json.put("url", url)
         json.put("type", type.name)
         if (youtubeVideoId != null) json.put("youtubeVideoId", youtubeVideoId)
+        if (liveChannelHandle != null) json.put("liveChannelHandle", liveChannelHandle)
         if (label != null) json.put("label", label)
         if (tvgId != null) json.put("tvgId", tvgId)
         json.put("isGeoBlocked", isGeoBlocked)
@@ -116,6 +118,7 @@ data class StreamSource(
                 url = json.optString("url", ""),
                 type = streamType,
                 youtubeVideoId = json.optString("youtubeVideoId").takeIf { it.isNotBlank() },
+                liveChannelHandle = json.optString("liveChannelHandle").takeIf { it.isNotBlank() },
                 label = json.optString("label").takeIf { it.isNotBlank() },
                 tvgId = json.optString("tvgId").takeIf { it.isNotBlank() },
                 isGeoBlocked = json.optBoolean("isGeoBlocked", false),

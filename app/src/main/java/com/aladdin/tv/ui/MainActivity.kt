@@ -965,9 +965,21 @@ class MainActivity : AppCompatActivity() {
                 binding.youtubePlayerView.isVisible = true
 
                 binding.tvOsdResolution.text = currentSource.label ?: "YOUTUBE"
-                val videoId = currentSource.youtubeVideoId ?: ""
-                binding.youtubePlayerView.loadIFrame(activeChannel.id, sourceId, attemptId, videoId)
-                binding.rootContainer.requestFocus()
+                val defaultVideoId = currentSource.youtubeVideoId ?: ""
+                val handle = currentSource.liveChannelHandle
+                if (!handle.isNullOrBlank()) {
+                    lifecycleScope.launch {
+                        val resolved = repository.resolveYouTubeLiveVideoId(handle)
+                        val finalVideoId = if (!resolved.isNullOrBlank()) resolved else defaultVideoId
+                        if (currentAttemptId == attemptId) {
+                            binding.youtubePlayerView.loadIFrame(activeChannel.id, sourceId, attemptId, finalVideoId)
+                            binding.rootContainer.requestFocus()
+                        }
+                    }
+                } else {
+                    binding.youtubePlayerView.loadIFrame(activeChannel.id, sourceId, attemptId, defaultVideoId)
+                    binding.rootContainer.requestFocus()
+                }
             }
             StreamType.WEB_VIEW -> {
                 // 官方網頁觀看模式 (如 ofiii)，網頁 URL 嚴禁直接交給 Media3，使用 WebView 載入
