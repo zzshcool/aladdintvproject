@@ -15,6 +15,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -24,6 +33,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 頻道資料儲存庫
@@ -94,6 +104,8 @@ class ChannelRepository(private val context: Context) {
     )
 
     private fun isDefunctExcludedChannel(channel: Channel): Boolean {
+        if (prefs.getStringSet("manually_hidden_channels", emptySet())!!.contains(channel.canonicalId)) return true
+        if (prefs.getStringSet("restored_channels", emptySet())!!.contains(channel.canonicalId)) return false
         val canon = channel.canonicalId.trim().lowercase().removePrefix("canon_").removePrefix("tvg_")
         val rawId = channel.id.trim().lowercase().removePrefix("ch_").removePrefix("seed_")
         val tvg = channel.tvgId?.trim()?.lowercase() ?: ""
@@ -113,6 +125,7 @@ class ChannelRepository(private val context: Context) {
     }
 
     private val ytLiveCache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
+    private val ytResolveLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     private val YT_CACHE_DURATION_MS = 60 * 60 * 1000L // 1 小時快取
 
     /**
@@ -121,48 +134,121 @@ class ChannelRepository(private val context: Context) {
     suspend fun resolveYouTubeLiveVideoId(handle: String): String? = withContext(Dispatchers.IO) {
         val cleanHandle = handle.trim()
         if (cleanHandle.isBlank()) return@withContext null
-        val now = System.currentTimeMillis()
-        val cached = ytLiveCache[cleanHandle]
-        if (cached != null && (now - cached.second) < YT_CACHE_DURATION_MS) {
-            return@withContext cached.first
-        }
-        try {
-            val encoded = if (cleanHandle.startsWith("@")) {
-                "@" + java.net.URLEncoder.encode(cleanHandle.substring(1), "UTF-8")
-            } else {
-                java.net.URLEncoder.encode(cleanHandle, "UTF-8")
+        ytResolveLocks.getOrPut(cleanHandle) { Mutex() }.withLock {
+            val now = System.currentTimeMillis()
+            val cached = getYouTubeResolution(cleanHandle)
+            if (cached != null && now - cached.second in 0 until YT_CACHE_DURATION_MS) {
+                return@withLock cached.first
             }
-            val targetUrl = "https://www.youtube.com/$encoded/live"
-            val request = Request.Builder()
-                .url(targetUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                .header("Accept-Language", "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7")
-                .build()
-            okHttpClient.newCall(request).execute().use { response ->
-                val finalUrl = response.request.url.toString()
-                val urlMatch = Regex("""watch\?v=([a-zA-Z0-9_-]{11})""").find(finalUrl)
-                if (urlMatch != null) {
-                    val vid = urlMatch.groupValues[1]
-                    ytLiveCache[cleanHandle] = Pair(vid, now)
-                    return@withContext vid
+            try {
+                val encoded = if (cleanHandle.startsWith("@")) {
+                    "@" + java.net.URLEncoder.encode(cleanHandle.substring(1), "UTF-8")
+                } else {
+                    java.net.URLEncoder.encode(cleanHandle, "UTF-8")
                 }
-                val body = response.body?.string().orEmpty()
-                val canonMatch = Regex("""<link\s+rel="canonical"\s+href="https://www\.youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})">""").find(body)
-                if (canonMatch != null) {
-                    val vid = canonMatch.groupValues[1]
-                    ytLiveCache[cleanHandle] = Pair(vid, now)
-                    return@withContext vid
+                val targetUrl = "https://www.youtube.com/$encoded/live"
+                val request = Request.Builder()
+                    .url(targetUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                    .header("Accept-Language", "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7")
+                    .build()
+                val call = okHttpClient.newCall(request)
+                call.timeout().timeout(AppConfig.YOUTUBE_LOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                val response = suspendCancellableCoroutine<Triple<Int, okhttp3.HttpUrl, String>> { continuation ->
+                    continuation.invokeOnCancellation { call.cancel() }
+                    call.enqueue(object : Callback {
+                        override fun onFailure(call: Call, e: java.io.IOException) {
+                            if (continuation.isActive) continuation.resumeWithException(e)
+                        }
+                        override fun onResponse(call: Call, response: Response) {
+                            try {
+                                val result = response.use { Triple(it.code, it.request.url, it.body?.string().orEmpty()) }
+                                if (continuation.isActive) continuation.resume(result)
+                            } catch (e: java.io.IOException) {
+                                if (continuation.isActive) continuation.resumeWithException(e)
+                            }
+                        }
+                    })
                 }
-                val jsonVidMatch = Regex(""""videoId":"([a-zA-Z0-9_-]{11})"""").find(body)
-                if (jsonVidMatch != null) {
-                    val vid = jsonVidMatch.groupValues[1]
-                    ytLiveCache[cleanHandle] = Pair(vid, now)
-                    return@withContext vid
+                run {
+                    if (response.first !in 200..299 || response.second.host !in setOf("www.youtube.com", "youtube.com")) return@withLock null
+                    val body = response.third
+                    val id = parseYouTubeLiveResponse(body, response.second.queryParameter("v"), cleanHandle)
+                        ?: return@withLock null
+                    val resolvedAt = System.currentTimeMillis()
+                    ytLiveCache[cleanHandle] = id to resolvedAt
+                    prefs.edit().putString("yt_live_$cleanHandle", JSONObject().put("id", id).put("time", resolvedAt).toString()).apply()
+                    id
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
             }
-        } catch (_: Exception) {
         }
-        return@withContext null
+    }
+
+    fun getYouTubeResolution(handle: String): Pair<String, Long>? {
+        val key = handle.trim()
+        ytLiveCache[key]?.let { return it }
+        return try {
+            val saved = JSONObject(prefs.getString("yt_live_$key", null) ?: return null)
+            val id = saved.getString("id")
+            if (!Regex("[A-Za-z0-9_-]{11}").matches(id)) return null
+            (id to saved.getLong("time")).also { ytLiveCache[key] = it }
+        } catch (_: Exception) { null }
+    }
+
+    fun invalidateYouTubeResolution(handle: String) {
+        ytLiveCache.remove(handle.trim())
+        prefs.edit().remove("yt_live_${handle.trim()}").apply()
+    }
+
+    fun isFavorite(channel: Channel) = prefs.getStringSet("favorite_channels", emptySet())!!.contains(channel.canonicalId)
+
+    fun toggleFavorite(channel: Channel) {
+        val ids = prefs.getStringSet("favorite_channels", emptySet())!!.toMutableSet()
+        if (!ids.add(channel.canonicalId)) ids.remove(channel.canonicalId)
+        prefs.edit().putStringSet("favorite_channels", ids).apply()
+    }
+
+    fun rememberWatchedChannel(channel: Channel) {
+        val ids = getRecentChannelIds().filterNot { it == channel.canonicalId }
+        prefs.edit().putString("recent_channels", JSONArray(listOf(channel.canonicalId) + ids.take(19)).toString()).apply()
+    }
+
+    fun getRecentChannelIds(): List<String> = try {
+        val array = JSONArray(prefs.getString("recent_channels", "[]"))
+        (0 until array.length()).map { array.getString(it) }
+    } catch (_: Exception) { emptyList() }
+
+    fun getHiddenChannels(): List<Channel> {
+        val archived = try {
+            val array = JSONArray(prefs.getString("hidden_channel_archive", "[]"))
+            (0 until array.length()).map { Channel.fromJson(array.getJSONObject(it)) }
+        } catch (_: Exception) { emptyList() }
+        return (getBuiltInSeedChannels() + archived).distinctBy { it.canonicalId }
+            .filter { isDefunctExcludedChannel(it) }
+    }
+
+    fun restoreHiddenChannel(channel: Channel) {
+        prefs.edit()
+            .putStringSet("restored_channels", prefs.getStringSet("restored_channels", emptySet())!! + channel.canonicalId)
+            .putStringSet("manually_hidden_channels", prefs.getStringSet("manually_hidden_channels", emptySet())!! - channel.canonicalId)
+            .apply()
+        val merged = applyUserSelectedSources(mergeAndDeduplicate(_channels.value, listOf(channel)))
+        _channels.value = merged
+        initHealthStatuses(merged)
+        saveToCache(merged)
+    }
+
+    fun hideChannel(channel: Channel) {
+        val archived = (getHiddenChannels() + channel).distinctBy { it.canonicalId }
+        prefs.edit().putString("hidden_channel_archive", JSONArray(archived.map { it.toJson() }).toString())
+            .putStringSet("manually_hidden_channels", prefs.getStringSet("manually_hidden_channels", emptySet())!! + channel.canonicalId)
+            .apply()
+        _channels.value = _channels.value.filterNot { it.canonicalId == channel.canonicalId }
+        saveToCache(_channels.value)
     }
 
 
@@ -617,6 +703,11 @@ class ChannelRepository(private val context: Context) {
         }
 
         // 重新分配嚴格唯一、確定性之頻道台號，不更動頻道 ID，並排除所有線路確認失效之頻道
+        val hidden = uniqueMap.values.filter { isDefunctExcludedChannel(it) }
+        if (hidden.isNotEmpty()) {
+            val archived = (getHiddenChannels() + hidden).distinctBy { it.canonicalId }
+            prefs.edit().putString("hidden_channel_archive", JSONArray(archived.map { it.toJson() }).toString()).apply()
+        }
         val filtered = uniqueMap.values.filterNot { isDefunctExcludedChannel(it) }
         return assignUniqueChannelNumbers(filtered)
     }
@@ -1191,7 +1282,6 @@ class ChannelRepository(private val context: Context) {
                     StreamSource(
                         url = "https://www.youtube.com/@momoch3571/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "momoch3571",
                         liveChannelHandle = "@momoch3571",
                         label = "YouTube官方 24H",
                         tvgId = "Momo2.tw",
@@ -1229,7 +1319,6 @@ class ChannelRepository(private val context: Context) {
                     StreamSource(
                         url = "https://www.youtube.com/@HotsaleTV/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "HotsaleTV",
                         liveChannelHandle = "@HotsaleTV",
                         label = "YouTube官方 24H",
                         tvgId = "EBCShop.tw",
@@ -1519,7 +1608,7 @@ class ChannelRepository(private val context: Context) {
             ofiiiChannel("smart_knowledge", 37, "Smart知識台", "生活學習", "litv-xinchuang19"),
             ofiiiChannel("ofiii_focus_knowledge", 82, "Focus探索新知台", "生活學習", "ofiii82")
         )
-        return allSeeds.filterNot { isDefunctExcludedChannel(it) }
+        return allSeeds
     }
 
     private fun channelsToM3u(channels: List<Channel>): String {
@@ -1531,5 +1620,44 @@ class ChannelRepository(private val context: Context) {
             }
         }
         return sb.toString()
+    }
+}
+
+internal fun parseYouTubeLiveResponse(body: String, redirectedId: String?, handle: String): String? {
+    return try {
+        val marker = Regex("""(?:var\s+)?ytInitialPlayerResponse\s*=\s*\{""").find(body)
+            ?: return null
+        val start = body.indexOf('{', marker.range.first)
+        var depth = 0
+        var quoted = false
+        var escaped = false
+        var end = -1
+        for (i in start until body.length) {
+            val c = body[i]
+            if (quoted) {
+                if (escaped) escaped = false else if (c == '\\') escaped = true else if (c == '"') quoted = false
+            } else when (c) {
+                '"' -> quoted = true
+                '{' -> depth++
+                '}' -> { depth--; if (depth == 0) { end = i + 1; break } }
+            }
+        }
+        if (end == -1) return null
+        val player = JSONObject(body.substring(start, end))
+        val details = player.optJSONObject("videoDetails") ?: return null
+        val microformat = player.optJSONObject("microformat")?.optJSONObject("playerMicroformatRenderer")
+        val live = microformat?.optJSONObject("liveBroadcastDetails")
+        val id = details.optString("videoId")
+        val ownerHandle = microformat?.optString("ownerProfileUrl")
+            ?.removePrefix("https://www.youtube.com/")?.trimEnd('/')
+        val requestedHandle = java.net.URLDecoder.decode(handle, "UTF-8")
+        val ownerMatches = ownerHandle != null && java.net.URLDecoder.decode(ownerHandle, "UTF-8")
+            .equals(requestedHandle, ignoreCase = true)
+        if (!Regex("[A-Za-z0-9_-]{11}").matches(id) || live?.optBoolean("isLiveNow") != true ||
+            player.optJSONObject("playabilityStatus")?.optString("status") != "OK" ||
+            !(redirectedId == id || ownerMatches)) return null
+        id
+    } catch (_: Exception) {
+        null
     }
 }

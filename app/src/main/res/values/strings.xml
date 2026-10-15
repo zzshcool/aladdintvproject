@@ -63,4 +63,18 @@
     <string name="touch_settings">設定</string>
     <string name="touch_exit">離開</string>
     <string name="touch_web">操作網頁</string>
+    <string name="favorite_channels">收藏</string>
+    <string name="recent_channels">最近觀看</string>
+    <string name="add_favorite">收藏目前頻道</string>
+    <string name="remove_favorite">取消收藏目前頻道</string>
+    <string name="no_favorite_channels">尚未收藏頻道</string>
+    <string name="no_recent_channels">尚無成功播放的觀看紀錄</string>
+    <string name="restore_hidden_channel">已隱藏頻道／恢復並測試</string>
+    <string name="no_hidden_channels">目前沒有已隱藏頻道</string>
+    <string name="hide_current_channel">隱藏目前頻道</string>
+    <string name="hide_channel_confirmation">隱藏「%1$s」？之後可從已隱藏頻道恢復。</string>
+    <string name="refresh_live_id">重新解析目前直播</string>
+    <string name="no_live_handle">目前線路不是 YouTube 動態直播入口</string>
+    <string name="live_resolution_unconfirmed">未確認直播 ID，改用官方直播入口</string>
+    <string name="invalid_youtube_id">影片 ID 無效，請選擇官方網頁觀看</string>
 </resources>

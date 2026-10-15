@@ -446,6 +446,14 @@
             android:layout_height="1dp"
             android:background="#1AFFFFFF" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:orientation="horizontal">
+            <Button android:id="@+id/btnFavoriteList" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/favorite_channels" />
+            <Button android:id="@+id/btnRecentChannels" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/recent_channels" />
+        </LinearLayout>
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rvChannels"
             android:layout_width="match_parent"
@@ -704,6 +712,11 @@
                 android:textColor="@color/tv_accent"
                 android:textSize="13sp"
                 android:textStyle="bold" />
+
+            <Button android:id="@+id/btnFavoriteChannel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/add_favorite" />
+            <Button android:id="@+id/btnHiddenChannels" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/restore_hidden_channel" />
+            <Button android:id="@+id/btnHideChannel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/hide_current_channel" />
+            <Button android:id="@+id/btnRefreshLiveId" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/refresh_live_id" />
 
             <!-- 4. 播放即時診斷資訊區 (敏感參數已脫敏) -->
             <TextView
