@@ -103,10 +103,43 @@ class ChannelRepository(private val context: Context) {
         "ofiii_food"
     )
 
+    // 僅恢復本輪已確認節目持續播放的官方線路，保留使用者手動隱藏設定。
+    private val RECHECKED_OFIII_CHANNELS = setOf(
+        "asia_travel",
+        "cts_main",
+        "ctv_main",
+        "global_finance",
+        "global_taiwan",
+        "goodtv_1",
+        "goodtv_2",
+        "longhua_classic",
+        "longhua_drama",
+        "longhua_foreign",
+        "longhua_japan_korea",
+        "longhua_movie",
+        "ofiii_concert",
+        "ofiii_doraemon",
+        "ofiii_ebc_entertainment",
+        "ofiii_finance",
+        "ofiii_focus_drama",
+        "ofiii_focus_knowledge",
+        "ofiii_food",
+        "ofiii_freeman",
+        "ofiii_golden_fans",
+        "ofiii_movies",
+        "ofiii_stephen_chow",
+        "ofiii_studio_classroom",
+        "smart_knowledge"
+    )
+
+    private fun isOfiiiSource(source: StreamSource): Boolean =
+        source.type == StreamType.WEB_VIEW && source.url.startsWith("https://www.ofiii.com/channel/watch/")
+
     private fun isDefunctExcludedChannel(channel: Channel): Boolean {
         if (prefs.getStringSet("manually_hidden_channels", emptySet())!!.contains(channel.canonicalId)) return true
         if (prefs.getStringSet("restored_channels", emptySet())!!.contains(channel.canonicalId)) return false
         val canon = channel.canonicalId.trim().lowercase().removePrefix("canon_").removePrefix("tvg_")
+        if (canon in RECHECKED_OFIII_CHANNELS) return channel.streamSources.none { isOfiiiSource(it) }
         val rawId = channel.id.trim().lowercase().removePrefix("ch_").removePrefix("seed_")
         val tvg = channel.tvgId?.trim()?.lowercase() ?: ""
         val name = channel.name.trim().lowercase()
@@ -703,12 +736,28 @@ class ChannelRepository(private val context: Context) {
         }
 
         // 重新分配嚴格唯一、確定性之頻道台號，不更動頻道 ID，並排除所有線路確認失效之頻道
-        val hidden = uniqueMap.values.filter { isDefunctExcludedChannel(it) }
+        val checkedSeedsByUrl = getBuiltInSeedChannels().filter { it.canonicalId in RECHECKED_OFIII_CHANNELS }
+            .flatMap { channel -> channel.streamSources.filter { isOfiiiSource(it) }.map { it.url to channel } }.toMap()
+        val normalized = uniqueMap.values.map { channel ->
+            val checked = channel.streamSources.firstNotNullOfOrNull { checkedSeedsByUrl[it.url] }
+            if (checked != null) channel.copy(
+                id = "ch_${checked.canonicalId}", canonicalId = checked.canonicalId,
+                name = checked.name, group = checked.group,
+                streamSources = channel.streamSources.filter { checkedSeedsByUrl[it.url]?.canonicalId == checked.canonicalId }
+            ) else channel
+        }
+        val hidden = normalized.filter { isDefunctExcludedChannel(it) }
         if (hidden.isNotEmpty()) {
             val archived = (getHiddenChannels() + hidden).distinctBy { it.canonicalId }
             prefs.edit().putString("hidden_channel_archive", JSONArray(archived.map { it.toJson() }).toString()).apply()
         }
-        val filtered = uniqueMap.values.filterNot { isDefunctExcludedChannel(it) }
+        val restoredIds = mutableSetOf<String>()
+        val filtered = normalized.filterNot { isDefunctExcludedChannel(it) }.map { channel ->
+            if (channel.canonicalId in RECHECKED_OFIII_CHANNELS) {
+                channel.copy(streamSources = channel.streamSources.filter { isOfiiiSource(it) })
+            } else channel
+        }.filter { it.streamSources.isNotEmpty() }
+            .filter { it.canonicalId !in RECHECKED_OFIII_CHANNELS || restoredIds.add(it.canonicalId) }
         return assignUniqueChannelNumbers(filtered)
     }
 
@@ -727,7 +776,7 @@ class ChannelRepository(private val context: Context) {
         // 1. 先固定所有規範頻道專屬台號
         for (ch in channels) {
             val rule = CANONICAL_RULES.firstOrNull { it.canonicalId == ch.canonicalId }
-            if (rule != null) {
+            if (rule != null && !usedNumbers.contains(rule.defaultNumber)) {
                 usedNumbers.add(rule.defaultNumber)
                 result.add(ch.copy(number = rule.defaultNumber))
             } else {
@@ -1567,6 +1616,7 @@ class ChannelRepository(private val context: Context) {
             ))
         )
         val allSeeds = augmented + listOf(
+            ofiiiChannel("cts_main", 12, "華視主頻", "無線綜合", "4gtv-4gtv041"),
             Channel(
                 id = "seed_ctv_main", canonicalId = "ctv_main", number = 11,
                 name = "中視主頻", group = "無線綜合",

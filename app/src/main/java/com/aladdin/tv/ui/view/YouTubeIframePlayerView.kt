@@ -212,12 +212,14 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    injectedAttemptId = 0L
                     Log.d(TAG, "WebView onPageStarted: url=$url attemptId=${activeAttempt?.attemptId}")
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     val attempt = activeAttempt ?: return
+                    if (url == null || url == "about:blank" || url != view?.url) return
                     // 導航事件歸屬驗證：確認此完成事件屬於當前 attempt，且未曾被舊導航消耗
                     if (attempt.attemptId != currentNavAttemptId) {
                         Log.d(TAG, "忽略舊導航之 onPageFinished: attemptId=${attempt.attemptId} navAttempt=$currentNavAttemptId")
@@ -329,6 +331,8 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
         val js = """
             (function() {
                 const ATTEMPT_ID = ${attempt.attemptId};
+                if (window.aladdinWatchAttempt === ATTEMPT_ID) return;
+                window.aladdinWatchAttempt = ATTEMPT_ID;
                 const CHANNEL_ID = '${attempt.channelId}';
                 const SOURCE_ID = '${attempt.sourceId}';
                 const PLAY_MODE = 'WEB_WATCH';
@@ -338,6 +342,26 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 let advanceCount = 0;
                 let progressTimer = null;
                 let domObserver = null;
+                let lastAdState = null;
+                let contentConfirmed = false;
+                let monitoredSrc = '';
+
+                function playbackDocuments() {
+                    const docs = [document];
+                    document.querySelectorAll('iframe').forEach(function(frame) {
+                        try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch(e) {}
+                    });
+                    return docs;
+                }
+
+                function isAdPlaying() {
+                    return playbackDocuments().some(function(doc) {
+                        return Array.from(doc.querySelectorAll('.ad-showing, .vjs-ad-playing, .vjs-ad-loading, .ima-ad-container, .house_video')).some(function(el) {
+                            const rect = el.getBoundingClientRect();
+                            return rect.width > 0 && rect.height > 0 && doc.defaultView.getComputedStyle(el).visibility !== 'hidden';
+                        });
+                    });
+                }
                 
                 function cleanupListeners() {
                     if (progressTimer) {
@@ -345,6 +369,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                         progressTimer = null;
                     }
                     advanceCount = 0;
+                    contentConfirmed = false;
                     if (currentVideo) {
                         currentVideo.removeEventListener('playing', onPlaying);
                         currentVideo.removeEventListener('waiting', onWaiting);
@@ -382,15 +407,20 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                             cleanupListeners();
                             return;
                         }
+                        if (isAdPlaying()) {
+                            contentConfirmed = false;
+                            advanceCount = 0;
+                            lastTime = video.currentTime || 0;
+                            return;
+                        }
                         const cur = video.currentTime || 0;
                         // 連續前進檢查：移除只要大於 0 就通過的漏洞，要求實質前進
                         if (cur > lastTime + 0.25) {
                             advanceCount++;
-                            if (advanceCount >= 2) {
+                            if (advanceCount >= 2 && !contentConfirmed) {
                                 const liveOk = isLiveConfirmed(video);
                                 AndroidBridge.onPlayingConfirmed(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, cur, liveOk);
-                                clearInterval(progressTimer);
-                                progressTimer = null;
+                                contentConfirmed = true;
                             }
                         } else {
                             advanceCount = 0;
@@ -404,20 +434,26 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     if (currentVideo) startProgress(currentVideo);
                 }
                 function onWaiting() {
+                    if (isAdPlaying()) return;
                     if (progressTimer) clearInterval(progressTimer);
+                    progressTimer = null;
+                    contentConfirmed = false;
                     advanceCount = 0;
                     AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 3, currentVideo ? currentVideo.currentTime || 0 : 0);
                 }
                 function onPause() {
                     if (progressTimer) clearInterval(progressTimer);
+                    progressTimer = null;
+                    contentConfirmed = false;
                     advanceCount = 0;
                 }
                 function onEnded() {
                     if (progressTimer) clearInterval(progressTimer);
                     advanceCount = 0;
-                    if (location.hostname.endsWith('ofiii.com') && currentVideo &&
-                        !isLiveConfirmed(currentVideo)) {
+                    if (location.hostname.endsWith('ofiii.com')) {
+                        const adTransition = isAdPlaying() || !isLiveConfirmed(currentVideo);
                         cleanupListeners();
+                        if (!adTransition) AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 3, 0);
                         return;
                     }
                     AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 0, currentVideo ? currentVideo.currentTime || 0 : 0);
@@ -432,6 +468,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     cleanupListeners();
                     currentVideo = video;
                     window.aladdinPlaybackVideo = video;
+                    monitoredSrc = video.currentSrc;
                     
                     video.addEventListener('playing', onPlaying);
                     video.addEventListener('waiting', onWaiting);
@@ -452,29 +489,54 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     }
                 }
                 
-                function scanAndBind() {
-                    if (location.hostname === 'ofiii.com' || location.hostname.endsWith('.ofiii.com')) {
-                        const section = document.querySelector('.player_section');
-                        if (section && !document.getElementById('aladdin-ofiii-player-layout')) {
-                            const style = document.createElement('style');
-                            style.id = 'aladdin-ofiii-player-layout';
-                            style.textContent = 'html,body{margin:0!important;overflow:hidden!important;}' +
-                                'header.header,footer{display:none!important;}' +
-                                '.player_section{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;background:#000!important;z-index:10!important;}' +
-                                '.player_section iframe{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;border:0!important;}' +
-                                '.player_section video.thumbnail{width:100%!important;height:100%!important;object-fit:contain!important;}';
-                            document.head.appendChild(style);
-                            for (let parent = section.parentElement; parent; parent = parent.parentElement) {
-                                parent.style.setProperty('transform', 'none', 'important');
-                                parent.style.setProperty('contain', 'none', 'important');
-                                parent.style.setProperty('overflow', 'visible', 'important');
-                            }
-                        }
+                function applyWatchLayout() {
+                    const host = location.hostname;
+                    const ofiii = host === 'ofiii.com' || host.endsWith('.ofiii.com');
+                    const youtube = host === 'youtube.com' || host.endsWith('.youtube.com');
+                    if (!ofiii && !youtube) return;
+                    const root = ofiii
+                        ? document.querySelector('.player_section, .player_fixed_section iframe[src*="/player"]')
+                        : document.querySelector('video.html5-main-video')?.closest('#player-container-outer, #player-container-id, ytm-player, ytd-player, #movie_player') ||
+                          document.querySelector('#player-container-outer, #player-container-id, ytm-player, ytd-player, #movie_player');
+                    if (!root) return;
+                    root.setAttribute('data-aladdin-watch-player', '');
+                    for (let parent = root.parentElement; parent; parent = parent.parentElement) {
+                        parent.style.setProperty('transform', 'none', 'important');
+                        parent.style.setProperty('contain', 'none', 'important');
+                        parent.style.setProperty('overflow', 'visible', 'important');
                     }
-                    const docs = [document];
-                    document.querySelectorAll('iframe').forEach(function(frame) {
-                        try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch(e) {}
+                    if (!document.getElementById('aladdin-watch-layout')) {
+                        const style = document.createElement('style');
+                        style.id = 'aladdin-watch-layout';
+                        const p = '[data-aladdin-watch-player]';
+                        style.textContent = 'html,body{margin:0!important;overflow:hidden!important;background:#000!important;}' +
+                            p + '{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;min-height:0!important;max-height:none!important;max-width:none!important;margin:0!important;padding:0!important;aspect-ratio:auto!important;background:#000!important;z-index:1000!important;}' +
+                            p + ' iframe{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;border:0!important;}' +
+                            p + ' video{object-fit:contain!important;}' +
+                            (ofiii
+                                ? 'header.header,.header_section,.header_container,footer{display:none!important;}' + p + ' video.thumbnail{width:100%!important;height:100%!important;}'
+                                : 'ytm-mobile-topbar-renderer,header.mobile-topbar-header,ytm-pivot-bar-renderer,ytd-masthead,#masthead-container{display:none!important;}' +
+                                  p + ' #player-container-inner,' + p + ' #player,' + p + ' #movie_player,' + p + ' .html5-video-container{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-height:0!important;margin:0!important;padding:0!important;box-sizing:border-box!important;}' +
+                                  p + ' .html5-main-video{position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;}');
+                        (document.head || document.documentElement).appendChild(style);
+                    }
+                    if (ofiii) root.querySelectorAll('iframe').forEach(function(frame) {
+                        try {
+                            const doc = frame.contentDocument;
+                            if (!doc || doc.getElementById('aladdin-frame-layout')) return;
+                            const style = doc.createElement('style');
+                            style.id = 'aladdin-frame-layout';
+                            style.textContent = 'html,body{margin:0!important;width:100%!important;height:100%!important;overflow:hidden!important;background:#000!important;}' +
+                                '.video-js{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;padding-top:0!important;}' +
+                                'video{object-fit:contain!important;}';
+                            (doc.head || doc.documentElement).appendChild(style);
+                        } catch(e) {}
                     });
+                }
+
+                function scanAndBind() {
+                    applyWatchLayout();
+                    const docs = playbackDocuments();
                     const videos = docs.flatMap(function(doc) {
                         return Array.from(doc.querySelectorAll('video')).filter(function(v) {
                             return !v.classList.contains('thumbnail') &&
@@ -482,22 +544,28 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                         });
                     });
                     if (videos.length > 0) {
-                        let candidate = videos[0];
-                        for (let i = 0; i < videos.length; i++) {
-                            if (!videos[i].paused || videos[i].offsetWidth > 100) {
-                                candidate = videos[i];
-                                break;
-                            }
-                        }
+                        const visible = videos.filter(function(v) { return v.getBoundingClientRect().width > 0 && v.getBoundingClientRect().height > 0; });
+                        const candidate = visible.find(function(v) { return !v.paused && v.readyState >= 2; }) || visible[0];
+                        if (!candidate) return false;
                         bindVideoElement(candidate);
+                        if (!candidate.paused && candidate.readyState >= 2 &&
+                            (!progressTimer || monitoredSrc !== candidate.currentSrc)) {
+                            monitoredSrc = candidate.currentSrc;
+                            contentConfirmed = false;
+                            startProgress(candidate);
+                        }
                         return true;
                     }
                     return false;
                 }
                 function checkAdAndLogin() {
                     try {
-                        const isAd = !!(document.querySelector('.ad-showing') || document.querySelector('.video-ads') || document.querySelector('.ytp-ad-player-overlay'));
-                        AndroidBridge.onAdState(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, isAd);
+                        const isAd = isAdPlaying();
+                        if (isAd !== lastAdState) {
+                            lastAdState = isAd;
+                            if (isAd) contentConfirmed = false;
+                            AndroidBridge.onAdState(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, isAd);
+                        }
 
                         const bodyTxt = document.body ? document.body.innerText : '';
                         if (bodyTxt.includes('Sign in to confirm you’re not a bot') || bodyTxt.includes('Sign in to confirm your age') || bodyTxt.includes('請登入以確認年齡')) {

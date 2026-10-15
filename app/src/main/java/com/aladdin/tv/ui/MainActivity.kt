@@ -62,6 +62,9 @@ class MainActivity : AppCompatActivity() {
     private var activeYouTubeVideoId: String? = null
     private var youtubeRefreshAttempted = false
     private var youtubeWebWatch = false
+    private var confirmedWebAttemptId = -1L
+    private var webAdAttemptId = -1L
+    private var webAdPlaying = false
     private val triedSourceIds = mutableSetOf<String>()
 
     // 播放診斷與監控狀態
@@ -364,6 +367,7 @@ class MainActivity : AppCompatActivity() {
                 val channel = currentPlayingChannel ?: return
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
+                confirmedWebAttemptId = attemptId
                 binding.layoutLoading.isVisible = false
                 binding.layoutYoutubeError.isVisible = false
 
@@ -408,6 +412,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 val channel = currentPlayingChannel ?: return
+                confirmedWebAttemptId = -1L
                 ytStablePlaybackJob?.cancel()
                 binding.layoutLoading.isVisible = true
                 startBufferingWatchdog(channel, attemptId)
@@ -448,8 +453,12 @@ class MainActivity : AppCompatActivity() {
 
             override fun onAdStateChanged(attemptId: Long, channelId: String, sourceId: String, isAdPlaying: Boolean) {
                 if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (webAdAttemptId == attemptId && webAdPlaying == isAdPlaying) return
+                webAdAttemptId = attemptId
+                webAdPlaying = isAdPlaying
                 val channel = currentPlayingChannel ?: return
                 if (isAdPlaying) {
+                    confirmedWebAttemptId = -1L
                     // 廣告播放中：暫停緩衝看門狗，避免廣告期間被誤判逾時換線
                     bufferingWatchdogJob?.cancel()
                     webWatchWatchdogJob?.cancel()
@@ -461,7 +470,7 @@ class MainActivity : AppCompatActivity() {
                         channel.currentSourceIndex,
                         channel.streamSources.size
                     )
-                } else {
+                } else if (confirmedWebAttemptId != attemptId) {
                     // 廣告結束切入正片：重啟監聽
                     startWebWatchWatchdog(channel, sourceId, attemptId)
                 }
@@ -971,6 +980,9 @@ class MainActivity : AppCompatActivity() {
         youtubeResolveJob?.cancel()
         activeYouTubeVideoId = null
         youtubeWebWatch = false
+        confirmedWebAttemptId = -1L
+        webAdAttemptId = -1L
+        webAdPlaying = false
         if (!refreshingLiveId) youtubeRefreshAttempted = false
         currentSessionToken++
         currentAttemptId++
