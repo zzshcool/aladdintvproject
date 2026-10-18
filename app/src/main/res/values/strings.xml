@@ -77,4 +77,7 @@
     <string name="no_live_handle">目前線路不是 YouTube 動態直播入口</string>
     <string name="live_resolution_unconfirmed">未確認直播 ID，改用官方直播入口</string>
     <string name="invalid_youtube_id">影片 ID 無效，請選擇官方網頁觀看</string>
+    <string name="touch_menu">播放選單</string>
+    <string name="touch_fill">填滿</string>
+    <string name="touch_fit">完整</string>
 </resources>

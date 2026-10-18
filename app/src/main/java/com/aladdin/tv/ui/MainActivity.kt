@@ -74,6 +74,8 @@ class MainActivity : AppCompatActivity() {
     private var lastDiagVerificationTime: String = "尚無"
 
     // 定時器 Job 管理
+    private var touchControlsDismissJob: Job? = null
+    private var fillScreen = false
     private var osdDismissJob: Job? = null
     private var drawerDismissJob: Job? = null
     private var numberKeyDebounceJob: Job? = null
@@ -170,6 +172,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         youtubeResolveJob?.cancel()
         super.onDestroy()
+        touchControlsDismissJob?.cancel()
         osdDismissJob?.cancel()
         drawerDismissJob?.cancel()
         numberKeyDebounceJob?.cancel()
@@ -179,6 +182,23 @@ class MainActivity : AppCompatActivity() {
         healthExpiryScanJob?.cancel()
         binding.youtubePlayerView.release()
         playerManager.release()
+    }
+
+    private fun scheduleTouchControlsDismiss() {
+        touchControlsDismissJob?.cancel()
+        if (!binding.layoutTouchControls.isVisible) return
+        touchControlsDismissJob = lifecycleScope.launch {
+            delay(5000)
+            binding.layoutTouchControls.isVisible = false
+        }
+    }
+
+    private fun applyVideoScale() {
+        binding.playerView.resizeMode = if (fillScreen)
+            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        binding.youtubePlayerView.setFillScreen(fillScreen)
+        binding.btnTouchFill.setText(if (fillScreen) R.string.touch_fit else R.string.touch_fill)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -247,6 +267,21 @@ class MainActivity : AppCompatActivity() {
         binding.layoutTouchControls.isVisible = packageManager.hasSystemFeature(
             android.content.pm.PackageManager.FEATURE_TOUCHSCREEN
         )
+        binding.btnTouchMenu.isVisible = binding.layoutTouchControls.isVisible
+        binding.btnTouchMenu.setOnClickListener {
+            binding.layoutTouchControls.isVisible = !binding.layoutTouchControls.isVisible
+            scheduleTouchControlsDismiss()
+        }
+        fillScreen = binding.btnTouchMenu.isVisible &&
+            getPreferences(MODE_PRIVATE).getBoolean("mobile_fill_screen", false)
+        applyVideoScale()
+        binding.btnTouchFill.setOnClickListener {
+            fillScreen = !fillScreen
+            getPreferences(MODE_PRIVATE).edit().putBoolean("mobile_fill_screen", fillScreen).apply()
+            applyVideoScale()
+            scheduleTouchControlsDismiss()
+        }
+        scheduleTouchControlsDismiss()
         if (binding.layoutTouchControls.isVisible) {
             for (list in listOf(binding.rvChannels, binding.rvStreamSources)) {
                 list.addOnChildAttachStateChangeListener(object : androidx.recyclerview.widget.RecyclerView.OnChildAttachStateChangeListener {

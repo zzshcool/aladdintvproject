@@ -63,6 +63,13 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
     var listener: YouTubePlayerListener? = null
 
+    private var fillScreen = false
+
+    fun setFillScreen(enabled: Boolean) {
+        fillScreen = enabled
+        webView?.evaluateJavascript("window.aladdinFillScreen = $enabled; window.aladdinApplyWatchLayout?.();", null)
+    }
+
     private var webView: WebView? = null
     private var activeAttempt: PlaybackAttempt? = null
     private var currentNavAttemptId: Long = 0L
@@ -489,7 +496,11 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     }
                 }
                 
+                window.aladdinFillScreen = $fillScreen;
                 function applyWatchLayout() {
+                    const fit = window.aladdinFillScreen ? 'cover' : 'contain';
+                    if (document.documentElement.style.getPropertyValue('--aladdin-video-fit') !== fit)
+                        document.documentElement.style.setProperty('--aladdin-video-fit', fit);
                     const host = location.hostname;
                     const ofiii = host === 'ofiii.com' || host.endsWith('.ofiii.com');
                     const youtube = host === 'youtube.com' || host.endsWith('.youtube.com');
@@ -512,7 +523,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                         style.textContent = 'html,body{margin:0!important;overflow:hidden!important;background:#000!important;}' +
                             p + '{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;min-height:0!important;max-height:none!important;max-width:none!important;margin:0!important;padding:0!important;aspect-ratio:auto!important;background:#000!important;z-index:1000!important;}' +
                             p + ' iframe{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;border:0!important;}' +
-                            p + ' video{object-fit:contain!important;}' +
+                            p + ' video{object-fit:var(--aladdin-video-fit,contain)!important;}' +
                             (ofiii
                                 ? 'header.header,.header_section,.header_container,footer{display:none!important;}' + p + ' video.thumbnail{width:100%!important;height:100%!important;}'
                                 : 'ytm-mobile-topbar-renderer,header.mobile-topbar-header,ytm-pivot-bar-renderer,ytd-masthead,#masthead-container{display:none!important;}' +
@@ -523,16 +534,21 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     if (ofiii) root.querySelectorAll('iframe').forEach(function(frame) {
                         try {
                             const doc = frame.contentDocument;
-                            if (!doc || doc.getElementById('aladdin-frame-layout')) return;
+                            if (!doc) return;
+                            if (doc.documentElement.style.getPropertyValue('--aladdin-video-fit') !== fit)
+                                doc.documentElement.style.setProperty('--aladdin-video-fit', fit);
+                            if (doc.getElementById('aladdin-frame-layout')) return;
                             const style = doc.createElement('style');
                             style.id = 'aladdin-frame-layout';
                             style.textContent = 'html,body{margin:0!important;width:100%!important;height:100%!important;overflow:hidden!important;background:#000!important;}' +
                                 '.video-js{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;padding-top:0!important;}' +
-                                'video{object-fit:contain!important;}';
+                                'video{object-fit:var(--aladdin-video-fit,contain)!important;}';
                             (doc.head || doc.documentElement).appendChild(style);
                         } catch(e) {}
                     });
                 }
+
+                window.aladdinApplyWatchLayout = applyWatchLayout;
 
                 function scanAndBind() {
                     applyWatchLayout();

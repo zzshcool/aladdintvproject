@@ -10,22 +10,38 @@
     android:focusableInTouchMode="true"
     android:keepScreenOn="true">
 
-    <LinearLayout
+    <Button
+        android:id="@+id/btnTouchMenu"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:minWidth="0dp"
+        android:padding="0dp"
+        android:text="☰"
+        android:contentDescription="@string/touch_menu"
+        android:elevation="8dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <HorizontalScrollView
         android:id="@+id/layoutTouchControls"
         android:layout_width="0dp"
         android:layout_height="48dp"
-        android:background="@color/black"
-        android:orientation="horizontal"
+        android:fillViewport="false"
+        android:scrollbars="none"
+        android:elevation="8dp"
+        android:background="#CC101010"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <Button android:id="@+id/btnTouchChannels" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_channels" />
-        <Button android:id="@+id/btnTouchSources" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_sources" />
-        <Button android:id="@+id/btnTouchSettings" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_settings" />
-        <Button android:id="@+id/btnTouchExit" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_exit" />
-        <Button android:id="@+id/btnTouchWeb" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="@string/touch_web" />
-    </LinearLayout>
+        app:layout_constraintEnd_toStartOf="@id/btnTouchMenu">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal">
+            <Button android:id="@+id/btnTouchChannels" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/touch_channels" />
+            <Button android:id="@+id/btnTouchSources" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/touch_sources" />
+            <Button android:id="@+id/btnTouchSettings" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/touch_settings" />
+            <Button android:id="@+id/btnTouchFill" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/touch_fill" />
+            <Button android:id="@+id/btnTouchExit" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/touch_exit" />
+            <Button android:id="@+id/btnTouchWeb" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/touch_web" />
+        </LinearLayout>
+    </HorizontalScrollView>
 
     <!-- 1. 全螢幕 Media3 播放器 (ExoPlayer 解碼 HLS/MP4/TS) -->
     <androidx.media3.ui.PlayerView
@@ -35,7 +51,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/layoutTouchControls"
+        app:layout_constraintTop_toTopOf="parent"
         app:resize_mode="fit"
         app:surface_type="surface_view"
         app:use_controller="false" />
@@ -49,7 +65,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/layoutTouchControls" />
+        app:layout_constraintTop_toTopOf="parent" />
 
     <!-- 3. YouTube 內嵌播放錯誤提示與切台引導浮層 -->
     <LinearLayout
