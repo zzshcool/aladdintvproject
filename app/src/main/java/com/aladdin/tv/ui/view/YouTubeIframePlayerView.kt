@@ -53,6 +53,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
             isLiveConfirmed: Boolean = true
         )
         fun onBuffering(attemptId: Long, channelId: String, sourceId: String, playMode: PlayMode)
+        fun onPaused(attemptId: Long, channelId: String, sourceId: String, playMode: PlayMode) {}
         fun onEnded(attemptId: Long, channelId: String, sourceId: String, playMode: PlayMode)
         fun onError(attemptId: Long, channelId: String, sourceId: String, playMode: PlayMode, errorCode: Int, rawReason: String, description: String)
         fun onAutoplayBlocked(attemptId: Long, channelId: String, sourceId: String, playMode: PlayMode)
@@ -63,6 +64,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
     var listener: YouTubePlayerListener? = null
 
+    private var playbackAllowed = false
     private var fillScreen = false
 
     fun setFillScreen(enabled: Boolean) {
@@ -95,7 +97,8 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                    h == "youtu.be" || h.endsWith(".youtu.be") ||
                    h == "youtube-nocookie.com" || h.endsWith(".youtube-nocookie.com") ||
                    h == "ofiii.com" || h.endsWith(".ofiii.com") ||
-                   h == "litv.tv" || h.endsWith(".litv.tv")
+                   h == "litv.tv" || h.endsWith(".litv.tv") ||
+                   h == "4gtv.tv" || h.endsWith(".4gtv.tv")
         }
     }
 
@@ -197,12 +200,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 }
 
                 override fun onHideCustomView() {
-                    customFullscreenView?.let { cv ->
-                        removeView(cv)
-                        customFullscreenView = null
-                        customViewCallback?.onCustomViewHidden()
-                        customViewCallback = null
-                    }
+                    clearCustomFullscreen()
                 }
             }
 
@@ -236,6 +234,9 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     if (attempt.playMode == PlayMode.WEB_WATCH && injectedAttemptId != attempt.attemptId) {
                         injectedAttemptId = attempt.attemptId
                         injectWebWatchScript(attempt)
+                        if (!playbackAllowed) pauseVideo()
+                    } else if (attempt.playMode == PlayMode.IFRAME) {
+                        sendPlaybackCommand(if (playbackAllowed) "play" else "pause")
                     }
                 }
 
@@ -263,6 +264,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     }
                 }
 
+                @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.M)
                 override fun onReceivedError(
                     view: WebView?,
                     request: WebResourceRequest?,
@@ -352,6 +354,13 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 let lastAdState = null;
                 let contentConfirmed = false;
                 let monitoredSrc = '';
+                let lastRestriction = '';
+                let monitorEnabled = true;
+                let scanTimer = null;
+                let scanPending = null;
+                let lastConfirmation = 0;
+                let stalledSamples = 0;
+                let stalled = false;
 
                 function playbackDocuments() {
                     const docs = [document];
@@ -424,26 +433,34 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                         // 連續前進檢查：移除只要大於 0 就通過的漏洞，要求實質前進
                         if (cur > lastTime + 0.25) {
                             advanceCount++;
-                            if (advanceCount >= 2 && !contentConfirmed) {
+                            stalledSamples = 0;
+                            stalled = false;
+                            if (advanceCount >= 2 && (!contentConfirmed || Date.now() - lastConfirmation >= 30000)) {
                                 const liveOk = isLiveConfirmed(video);
                                 AndroidBridge.onPlayingConfirmed(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, cur, liveOk);
-                                contentConfirmed = true;
+                                contentConfirmed = liveOk;
+                                lastConfirmation = Date.now();
                             }
                         } else {
                             advanceCount = 0;
+                            if (!video.paused && ++stalledSamples >= 5) {
+                                stalledSamples = 0;
+                                onWaiting();
+                            }
                         }
                         lastTime = cur;
                     }, 1000);
                 }
                 
                 function onPlaying() {
+                    if (!monitorEnabled) { if (currentVideo) currentVideo.pause(); return; }
+                    stalled = false;
                     AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 1, currentVideo ? currentVideo.currentTime || 0 : 0);
                     if (currentVideo) startProgress(currentVideo);
                 }
                 function onWaiting() {
-                    if (isAdPlaying()) return;
-                    if (progressTimer) clearInterval(progressTimer);
-                    progressTimer = null;
+                    if (!monitorEnabled || stalled || isAdPlaying()) return;
+                    stalled = true;
                     contentConfirmed = false;
                     advanceCount = 0;
                     AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 3, currentVideo ? currentVideo.currentTime || 0 : 0);
@@ -453,11 +470,13 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     progressTimer = null;
                     contentConfirmed = false;
                     advanceCount = 0;
+                    if (monitorEnabled && !isAdPlaying()) AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 2, 0);
                 }
                 function onEnded() {
+                    if (!monitorEnabled) return;
                     if (progressTimer) clearInterval(progressTimer);
                     advanceCount = 0;
-                    if (location.hostname.endsWith('ofiii.com')) {
+                    if (location.hostname.endsWith('ofiii.com') || location.hostname === 'www.4gtv.tv' || location.hostname === '4gtv.tv') {
                         const adTransition = isAdPlaying() || !isLiveConfirmed(currentVideo);
                         cleanupListeners();
                         if (!adTransition) AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 3, 0);
@@ -466,6 +485,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 0, currentVideo ? currentVideo.currentTime || 0 : 0);
                 }
                 function onError() {
+                    if (!monitorEnabled) return;
                     cleanupListeners();
                     AndroidBridge.onError(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, -1002, 'HTML5 Video Playback Error');
                 }
@@ -485,7 +505,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     
                     if (!video.paused && (video.currentTime || 0) > 0) {
                         onPlaying();
-                    } else {
+                    } else if (location.hostname !== '4gtv.tv' && !location.hostname.endsWith('.4gtv.tv')) {
                         try {
                             video.play().catch(function() {
                                 AndroidBridge.onAutoplayBlocked(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE);
@@ -504,8 +524,9 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     const host = location.hostname;
                     const ofiii = host === 'ofiii.com' || host.endsWith('.ofiii.com');
                     const youtube = host === 'youtube.com' || host.endsWith('.youtube.com');
-                    if (!ofiii && !youtube) return;
-                    const root = ofiii
+                    const fourgtv = host === '4gtv.tv' || host.endsWith('.4gtv.tv');
+                    if (!ofiii && !youtube && !fourgtv) return;
+                    const root = fourgtv ? document.querySelector('#videoPlay') : ofiii
                         ? document.querySelector('.player_section, .player_fixed_section iframe[src*="/player"]')
                         : document.querySelector('video.html5-main-video')?.closest('#player-container-outer, #player-container-id, ytm-player, ytd-player, #movie_player') ||
                           document.querySelector('#player-container-outer, #player-container-id, ytm-player, ytd-player, #movie_player');
@@ -575,6 +596,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     return false;
                 }
                 function checkAdAndLogin() {
+                    if (!monitorEnabled) return;
                     try {
                         const isAd = isAdPlaying();
                         if (isAd !== lastAdState) {
@@ -582,104 +604,143 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                             if (isAd) contentConfirmed = false;
                             AndroidBridge.onAdState(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, isAd);
                         }
-
-                        const bodyTxt = document.body ? document.body.innerText : '';
+                        const errorRoot = document.querySelector('yt-playability-error-supported-renderers, ytm-player-error-message-renderer, .ytp-error, #error-screen');
+                        const bodyTxt = (errorRoot || document.body)?.innerText || '';
+                        let restriction = '';
                         if (bodyTxt.includes('Sign in to confirm you’re not a bot') || bodyTxt.includes('Sign in to confirm your age') || bodyTxt.includes('請登入以確認年齡')) {
-                            AndroidBridge.onLoginRequired(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID);
-                        } else if (bodyTxt.includes('上傳者並未允許這部影片在你的國家') || 
+                            restriction = 'login';
+                        } else if (bodyTxt.includes('上傳者並未允許這部影片在你的國家') ||
                                    bodyTxt.includes('not made this video available in your country') ||
                                    bodyTxt.includes('此影片在您的國家/地區無法播放') ||
                                    bodyTxt.includes('This video is not available in your country') ||
                                    bodyTxt.includes('未在您的國家/地區開放此影片')) {
-                            AndroidBridge.onGeoBlocked(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, '上傳者並未允許這部影片在你的國家／地區播放');
+                            restriction = 'geo';
                         }
-                    } catch(e) {}
+                        if (restriction !== lastRestriction) {
+                            lastRestriction = restriction;
+                            if (restriction === 'login') AndroidBridge.onLoginRequired(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID);
+                            if (restriction === 'geo') AndroidBridge.onGeoBlocked(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, '上傳者並未允許這部影片在你的國家／地區播放');
+                        }
+                    } catch(e) { console.warn('Aladdin restriction scan failed'); }
                 }
 
-                scanAndBind();
-                checkAdAndLogin();
-                setInterval(function() { scanAndBind(); checkAdAndLogin(); }, 1000);
-                
-                // MutationObserver 監測 video 元素替換 (如廣告切換至正片直播)
-                try {
-                    domObserver = new MutationObserver(function() {
-                        scanAndBind();
-                        checkAdAndLogin();
-                    });
-                    domObserver.observe(document.body || document.documentElement, {
-                        childList: true,
-                        subtree: true
-                    });
-                } catch(e) {}
+                function scan() {
+                    if (!monitorEnabled) return;
+                    scanAndBind();
+                    checkAdAndLogin();
+                }
+                function startMonitoring() {
+                    monitorEnabled = true;
+                    if (!scanTimer) scanTimer = setInterval(scan, 2000);
+                    if (!domObserver) {
+                        domObserver = new MutationObserver(function() {
+                            if (!monitorEnabled || scanPending) return;
+                            scanPending = setTimeout(function() { scanPending = null; scan(); }, 300);
+                        });
+                    }
+                    domObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+                    scan();
+                }
+                function pauseMonitoring() {
+                    monitorEnabled = false;
+                    clearInterval(scanTimer); scanTimer = null;
+                    clearTimeout(scanPending); scanPending = null;
+                    if (domObserver) domObserver.disconnect();
+                    if (progressTimer) clearInterval(progressTimer);
+                    progressTimer = null;
+                    contentConfirmed = false;
+                    advanceCount = 0;
+                }
+                window.aladdinControl = function(id, command) {
+                    if (id !== ATTEMPT_ID) return 'stale';
+                    if (command === 'pause' || command === 'stop') {
+                        pauseMonitoring();
+                        playbackDocuments().forEach(function(doc) {
+                            doc.querySelectorAll('video,audio').forEach(function(media) { media.pause(); });
+                        });
+                        if (command === 'stop') cleanupListeners();
+                        return 'paused';
+                    }
+                    startMonitoring();
+                    const video = window.aladdinPlaybackVideo;
+                    if (video) {
+                        video.play().catch(function() {
+                            AndroidBridge.onAutoplayBlocked(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE);
+                        });
+                        return 'requested';
+                    }
+                    return 'waiting';
+                };
+                startMonitoring();
             })();
         """.trimIndent()
 
         webView?.evaluateJavascript(js, null)
     }
 
+    private fun sendPlaybackCommand(command: String) {
+        val attempt = activeAttempt ?: return
+        webView?.evaluateJavascript(
+            "(function(){return window.aladdinControl ? window.aladdinControl(${attempt.attemptId}, '$command') : 'not-ready';})();"
+        ) { result ->
+            if (activeAttempt?.attemptId == attempt.attemptId) {
+                Log.d(TAG, "Playback command=$command attempt=${attempt.attemptId} result=$result")
+            }
+        }
+    }
+
     /**
      * 遙控器 OK 或觸控手動起播
      */
     fun triggerManualPlay() {
-        val attempt = activeAttempt ?: return
-        if (attempt.playMode == PlayMode.IFRAME) {
-            webView?.evaluateJavascript(
-                "if (window.player && player.playVideo) { player.playVideo(); }",
-                null
-            )
-        } else {
+        if (!playbackAllowed) return
+        sendPlaybackCommand("play")
+        if (activeAttempt?.playMode == PlayMode.WEB_WATCH) {
             webView?.evaluateJavascript(
                 """
                 (function() {
                     const entry = document.querySelector('.player_section .play_icon');
-                    if (entry && !window.aladdinPlaybackVideo) { entry.parentElement.click(); return; }
-                    const v = window.aladdinPlaybackVideo || document.querySelector('video:not(.thumbnail)');
-                    if (v) { v.play().catch(function() {}); }
-                    const btn = document.querySelector('.ytp-play-button') || 
-                                document.querySelector('button[aria-label*="Play"]') || 
-                                document.querySelector('button[aria-label*="播放"]');
-                    if (btn) { btn.click(); }
+                    if (entry && !window.aladdinPlaybackVideo) entry.parentElement.click();
                 })();
-                """.trimIndent(),
-                null
+                """.trimIndent(), null
             )
         }
+    }
+
+    private fun clearCustomFullscreen() {
+        val view = customFullscreenView
+        val callback = customViewCallback
+        customFullscreenView = null
+        customViewCallback = null
+        if (view != null) (view.parent as? android.view.ViewGroup)?.removeView(view)
+        callback?.onCustomViewHidden()
+        setFocusIsolationEnabled(!isWebInteractionEnabled)
     }
 
     /**
      * 停止播放並清空當前頁面與背景音訊，避免雙重聲音
      */
     fun stopAndClear() {
+        sendPlaybackCommand("stop")
+        clearCustomFullscreen()
         activeAttempt = null
         injectedAttemptId = 0L
         webView?.let { wv ->
-            try {
-                wv.evaluateJavascript(
-                    "if (window.player && player.stopVideo) { player.stopVideo(); } const v = window.aladdinPlaybackVideo || document.querySelector('video:not(.thumbnail)'); if (v) { v.pause(); }",
-                    null
-                )
-            } catch (_: Exception) {}
             wv.stopLoading()
             wv.loadUrl("about:blank")
         }
     }
 
     fun pauseVideo() {
-        val attempt = activeAttempt ?: return
-        if (attempt.playMode == PlayMode.IFRAME) {
-            webView?.evaluateJavascript("if (window.player && player.pauseVideo) { player.pauseVideo(); }", null)
-        } else {
-            webView?.evaluateJavascript("const v = window.aladdinPlaybackVideo || document.querySelector('video:not(.thumbnail)'); if (v) { v.pause(); }", null)
-        }
+        playbackAllowed = false
+        sendPlaybackCommand("pause")
+        webView?.onPause()
     }
 
     fun resumeVideo() {
-        val attempt = activeAttempt ?: return
-        if (attempt.playMode == PlayMode.IFRAME) {
-            webView?.evaluateJavascript("if (window.player && player.playVideo) { player.playVideo(); }", null)
-        } else {
-            webView?.evaluateJavascript("const v = window.aladdinPlaybackVideo || document.querySelector('video:not(.thumbnail)'); if (v) { v.play().catch(function() {}); }", null)
-        }
+        playbackAllowed = true
+        webView?.onResume()
+        sendPlaybackCommand("play")
     }
 
     fun canGoBack(): Boolean = webView?.canGoBack() == true
@@ -690,7 +751,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
     fun handleBackPress(): Boolean {
         if (customFullscreenView != null) {
-            (webView?.webChromeClient as? WebChromeClient)?.onHideCustomView()
+            clearCustomFullscreen()
             return true
         }
         if (canGoBack()) {
@@ -731,6 +792,19 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     const PLAY_MODE = 'IFRAME';
                     const VIDEO_ID = '$videoId';
                     let player = null;
+                    let playerReady = false;
+                    let desiredPlayback = $playbackAllowed;
+                    let lastConfirmation = 0;
+                    window.aladdinControl = function(id, command) {
+                        if (id !== ATTEMPT_ID) return 'stale';
+                        desiredPlayback = command === 'play';
+                        if (!desiredPlayback) clearProgressTimer();
+                        if (!playerReady) return 'waiting';
+                        if (command === 'stop') player.stopVideo();
+                        else if (desiredPlayback) player.playVideo();
+                        else player.pauseVideo();
+                        return 'requested';
+                    };
                     let lastTime = 0;
                     let advanceCount = 0;
                     let progressTimer = null;
@@ -745,15 +819,18 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
                     function startProgressCheck() {
                         clearProgressTimer();
+                        lastConfirmation = 0;
                         lastTime = (player && player.getCurrentTime) ? player.getCurrentTime() : 0;
                         progressTimer = setInterval(function() {
                             const cur = (player && player.getCurrentTime) ? player.getCurrentTime() : 0;
                             if (cur > lastTime + 0.3) {
                                 advanceCount++;
-                                if (advanceCount >= 2) {
+                                if (advanceCount >= 2 && (lastConfirmation === 0 || Date.now() - lastConfirmation >= 30000)) {
                                     AndroidBridge.onPlayingConfirmed(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, cur);
-                                    clearProgressTimer();
+                                    lastConfirmation = Date.now();
                                 }
+                            } else {
+                                advanceCount = 0;
                             }
                             lastTime = cur;
                         }, 1000);
@@ -765,7 +842,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                             width: '100%',
                             videoId: VIDEO_ID,
                             playerVars: {
-                                'autoplay': 1,
+                                'autoplay': ${if (playbackAllowed) 1 else 0},
                                 'controls': 1,
                                 'rel': 0,
                                 'playsinline': 1,
@@ -781,6 +858,8 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     }
 
                     function onPlayerReady(event) {
+                        playerReady = true;
+                        if (!desiredPlayback) { player.pauseVideo(); return; }
                         AndroidBridge.onReady(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE);
                         try {
                             const p = event.target.playVideo();
@@ -796,6 +875,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
                     function onPlayerStateChange(event) {
                         const state = event.data;
+                        if (state === 1 && !desiredPlayback) { player.pauseVideo(); return; }
                         let curTime = 0;
                         try {
                             if (player && player.getCurrentTime) {
@@ -830,6 +910,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 val current = activeAttempt ?: return@post
                 if (current.attemptId == attemptId && current.channelId == channelId && current.sourceId == sourceId) {
                     val mode = if (modeStr == "WEB_WATCH") PlayMode.WEB_WATCH else PlayMode.IFRAME
+                    sendPlaybackCommand(if (playbackAllowed) "play" else "pause")
                     listener?.onReady(attemptId, channelId, sourceId, mode)
                 }
             }
@@ -853,6 +934,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 val mode = if (modeStr == "WEB_WATCH") PlayMode.WEB_WATCH else PlayMode.IFRAME
                 when (state) {
                     1 -> listener?.onPlaying(attemptId, channelId, sourceId, mode)
+                    2 -> listener?.onPaused(attemptId, channelId, sourceId, mode)
                     3 -> listener?.onBuffering(attemptId, channelId, sourceId, mode)
                     0 -> listener?.onEnded(attemptId, channelId, sourceId, mode)
                 }

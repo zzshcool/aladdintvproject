@@ -1,0 +1,368 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+        android:id="@+id/layoutSettings"
+        android:layout_width="400dp"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_overlay_panel"
+        android:clickable="true"
+        android:elevation="16dp"
+        android:focusable="true"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constrainedHeight="true"
+        android:layout_marginVertical="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="22dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/settings_title"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btnCloseSettings"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_channel_focus"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="4dp"
+                    android:text="@string/close_settings"
+                    android:textColor="@color/tv_text_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 1. 外觀主題區 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="@string/theme_setting"
+                android:textColor="@color/tv_text_secondary"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/btnThemeSystem"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_channel_focus"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:text="@string/theme_system"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btnThemeDark"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="2dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_channel_focus"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:text="@string/theme_dark"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btnThemeLight"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_channel_focus"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:text="@string/theme_light"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnAccentColor"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/accent_setting" />
+
+            <!-- 2. 畫質上限偏好區 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/quality_setting"
+                android:textColor="@color/tv_text_secondary"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/btnQualityAuto"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_channel_focus"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:text="@string/quality_auto"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btnQuality1080p"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="2dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_channel_focus"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:text="@string/quality_1080p"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/btnQuality4k"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_channel_focus"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:text="@string/quality_4k"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="@string/quality_note"
+                android:textColor="@color/tv_text_secondary"
+                android:textSize="11sp" />
+
+            <!-- 3. 頻道來源資訊區 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/source_status_title"
+                android:textColor="@color/tv_text_secondary"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_channel_focus"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:id="@+id/tvSourceStatusDesc"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    tools:text="主要與備用來源更新成功" />
+
+                <TextView
+                    android:id="@+id/tvSourceLastUpdated"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/tv_text_secondary"
+                    android:textSize="11sp"
+                    tools:text="最後更新：2026/10/11 22:30" />
+
+                <TextView
+                    android:id="@+id/tvSourceChannelCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="@color/tv_text_secondary"
+                    android:textSize="11sp"
+                    tools:text="有效頻道：82 台" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/btnRefreshChannels"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_channel_focus"
+                android:clickable="true"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:gravity="center"
+                android:paddingVertical="10dp"
+                android:text="@string/refresh_channels"
+                android:textColor="?attr/tvAccent"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button android:id="@+id/btnFavoriteChannel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/add_favorite" />
+            <Button android:id="@+id/btnHiddenChannels" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/restore_hidden_channel" />
+            <Button android:id="@+id/btnHideChannel" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/hide_current_channel" />
+            <Button android:id="@+id/btnRefreshLiveId" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/refresh_live_id" />
+
+            <!-- 4. 播放即時診斷資訊區 (敏感參數已脫敏) -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/diagnostics_title"
+                android:textColor="@color/tv_text_secondary"
+                android:textSize="13sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_channel_focus"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:id="@+id/tvDiagChannel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    tools:text="頻道：CH 51 東森新聞台" />
+
+                <TextView
+                    android:id="@+id/tvDiagSource"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/tv_text_secondary"
+                    android:textSize="11sp"
+                    tools:text="線路：HiNet CDN (1/2)" />
+
+                <TextView
+                    android:id="@+id/tvDiagMode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="@color/tv_text_secondary"
+                    android:textSize="11sp"
+                    tools:text="模式：Media3 原生硬解 (支援畫質限制)" />
+
+                <TextView
+                    android:id="@+id/tvDiagQualityStrategy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="@color/tv_text_secondary"
+                    android:textSize="11sp"
+                    tools:text="4K策略：自動" />
+
+                <TextView
+                    android:id="@+id/tvDiagResult"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="@color/tv_text_secondary"
+                    android:textSize="11sp"
+                    tools:text="本輪嘗試：成功" />
+            </LinearLayout>
+
+            <!-- 5. 備援與資料管理 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/fallback_settings_title"
+                android:textColor="@color/tv_text_secondary"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/btnToggleAutoFallback"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_channel_focus"
+                android:clickable="true"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:gravity="center"
+                android:paddingVertical="10dp"
+                android:text="@string/auto_fallback_off"
+                android:textColor="@color/tv_text_primary"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/btnClearWebData"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_channel_focus"
+                android:clickable="true"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:gravity="center"
+                android:paddingVertical="10dp"
+                android:text="@string/clear_web_data"
+                android:textColor="@color/tv_text_secondary"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+    </ScrollView>

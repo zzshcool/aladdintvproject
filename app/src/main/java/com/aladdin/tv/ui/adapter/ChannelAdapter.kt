@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.AsyncListDiffer
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.aladdin.tv.R
@@ -23,37 +24,38 @@ class ChannelAdapter(
     private val onChannelClick: (channel: Channel, position: Int) -> Unit
 ) : RecyclerView.Adapter<ChannelAdapter.ChannelViewHolder>() {
 
-    private val channels = mutableListOf<Channel>()
-    private var playingIndex: Int = -1
+    private val differ = AsyncListDiffer(this, ChannelDiffCallback())
+    private val channels: List<Channel> get() = differ.currentList
+    private var submittedChannels = emptyList<Channel>()
+    private var playingChannelId: String? = null
+    private var positions = emptyMap<String, Int>()
+
+    init {
+        differ.addListListener { _, current ->
+            positions = current.mapIndexed { index, channel -> channel.id to index }.toMap()
+        }
+    }
 
     @SuppressLint("NotifyDataSetChanged")
     fun submitList(newChannels: List<Channel>) {
-        val diffCallback = ChannelDiffCallback(this.channels, newChannels)
-        val diffResult = DiffUtil.calculateDiff(diffCallback)
-        this.channels.clear()
-        this.channels.addAll(newChannels)
-        diffResult.dispatchUpdatesTo(this)
+        submittedChannels = newChannels.toList()
+        differ.submitList(submittedChannels)
     }
 
     fun setPlayingIndex(newIndex: Int) {
-        val oldIndex = playingIndex
-        playingIndex = newIndex
-        if (oldIndex in channels.indices) {
-            notifyItemChanged(oldIndex)
-        }
-        if (newIndex in channels.indices) {
-            notifyItemChanged(newIndex)
-        }
+        val nextId = submittedChannels.getOrNull(newIndex)?.id
+        if (nextId == playingChannelId) return
+        val oldId = playingChannelId
+        playingChannelId = nextId
+        oldId?.let { positions[it]?.let { index -> notifyItemChanged(index) } }
+        nextId?.let { positions[it]?.let { index -> notifyItemChanged(index) } }
     }
 
     fun notifyHealthChanged(channelId: String) {
-        val index = channels.indexOfFirst { it.id == channelId }
-        if (index != -1) {
-            notifyItemChanged(index)
-        }
+        positions[channelId]?.let { notifyItemChanged(it, "health") }
     }
 
-    fun getPlayingIndex(): Int = playingIndex
+    fun getPlayingIndex(): Int = playingChannelId?.let { positions[it] } ?: -1
 
     fun getItem(position: Int): Channel? = channels.getOrNull(position)
 
@@ -69,7 +71,7 @@ class ChannelAdapter(
     override fun onBindViewHolder(holder: ChannelViewHolder, position: Int) {
         val channel = channels[position]
         val health = getChannelHealth(channel)
-        holder.bind(channel, position == playingIndex, health)
+        holder.bind(channel, channel.id == playingChannelId, health)
     }
 
     override fun getItemCount(): Int = channels.size
@@ -111,7 +113,7 @@ class ChannelAdapter(
         fun bind(channel: Channel, isPlaying: Boolean, health: ChannelHealth) {
             val context = itemView.context
 
-            binding.tvChannelNum.text = String.format("%02d", channel.number)
+            binding.tvChannelNum.text = String.format(java.util.Locale.ROOT, "%02d", channel.number)
             binding.tvChannelName.text = channel.name.ifBlank { "頻道 ${channel.number}" }
 
             val groupText = buildString {
@@ -137,7 +139,7 @@ class ChannelAdapter(
 
             val color = ContextCompat.getColor(context, colorRes)
             binding.viewStatusDot.background?.setColorFilter(color, PorterDuff.Mode.SRC_IN)
-            val displayText = if (!health.message.isNullOrBlank() && (health.status == ChannelHealthStatus.CONNECTING || health.status == ChannelHealthStatus.FAILED)) {
+            val displayText = if (!health.message.isNullOrBlank() && health.status != ChannelHealthStatus.NORMAL) {
                 health.message
             } else {
                 context.getString(textRes)
@@ -147,21 +149,13 @@ class ChannelAdapter(
         }
     }
 
-    private class ChannelDiffCallback(
-        private val oldList: List<Channel>,
-        private val newList: List<Channel>
-    ) : DiffUtil.Callback() {
-        override fun getOldListSize(): Int = oldList.size
-        override fun getNewListSize(): Int = newList.size
+    private class ChannelDiffCallback : DiffUtil.ItemCallback<Channel>() {
+        override fun areItemsTheSame(oldItem: Channel, newItem: Channel): Boolean = oldItem.id == newItem.id
 
-        override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-            return oldList[oldItemPosition].id == newList[newItemPosition].id
-        }
-
-        override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-            val oldItem = oldList[oldItemPosition]
-            val newItem = newList[newItemPosition]
-            return oldItem == newItem && oldItem.currentSourceIndex == newItem.currentSourceIndex
-        }
+        override fun areContentsTheSame(oldItem: Channel, newItem: Channel): Boolean =
+            oldItem.id == newItem.id && oldItem.number == newItem.number &&
+                oldItem.name == newItem.name && oldItem.group == newItem.group &&
+                oldItem.isGeoBlocked == newItem.isGeoBlocked && oldItem.isPartTime == newItem.isPartTime &&
+                oldItem.streamSources.size == newItem.streamSources.size
     }
 }

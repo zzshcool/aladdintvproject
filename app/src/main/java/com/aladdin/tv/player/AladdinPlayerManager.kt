@@ -54,6 +54,9 @@ class AladdinPlayerManager(
     private var currentChannel: Channel? = null
     private var currentSessionToken: Long = 0L
 
+    private var playbackAllowed = false
+    private var qualityPreference = AppConfig.QUALITY_AUTO
+    private var resumeRetry = false
     private var retryCount = 0
     private var retryJob: Job? = null
     private var stablePlaybackJob: Job? = null
@@ -302,7 +305,8 @@ class AladdinPlayerManager(
      * 套用畫質偏好上限 (自動 / 最高 1080p / 允許 4K)
      */
     fun setQualityPreference(preference: Int) {
-        val selector = trackSelector ?: return
+        qualityPreference = preference
+        if (trackSelector == null) return
         val capResult = DeviceCapabilityUtils.check4kCapability(context)
 
         val (maxWidth, maxHeight) = when (preference) {
@@ -359,6 +363,10 @@ class AladdinPlayerManager(
         stablePlaybackJob?.cancel()
         retryCount = 0
         currentChannel = channel
+        resumeRetry = false
+        droppedFramesCount = 0
+        lastDropCheckTime = 0L
+        setQualityPreference(qualityPreference)
         _currentResolution.value = channel.currentSource?.label ?: "LIVE"
 
         val connectingMsg = if (channel.currentSourceIndex > 0) {
@@ -374,12 +382,16 @@ class AladdinPlayerManager(
             player.stop()
             player.setMediaItem(mediaItem)
             player.prepare()
-            player.playWhenReady = true
+            player.playWhenReady = playbackAllowed
         }
     }
 
     private fun triggerAutoRetry(channel: Channel, token: Long, reason: String) {
         if (token != currentSessionToken) return
+        if (!playbackAllowed) {
+            resumeRetry = true
+            return
+        }
 
         retryJob?.cancel()
         stablePlaybackJob?.cancel()
@@ -399,12 +411,12 @@ class AladdinPlayerManager(
 
             retryJob = scope.launch(Dispatchers.Main) {
                 delay(AppConfig.RETRY_INTERVAL_MS * (1L shl (retryCount - 1)))
-                if (token == currentSessionToken) {
+                if (playbackAllowed && token == currentSessionToken) {
                     exoPlayer?.let { player ->
                         val mediaItem = MediaItem.fromUri(channel.url)
                         player.setMediaItem(mediaItem)
                         player.prepare()
-                        player.playWhenReady = true
+                        player.playWhenReady = playbackAllowed
                     }
                 }
             }
@@ -420,10 +432,23 @@ class AladdinPlayerManager(
     }
 
     fun setPlayWhenReady(playWhenReady: Boolean) {
+        playbackAllowed = playWhenReady
+        if (!playWhenReady) {
+            resumeRetry = resumeRetry || retryJob?.isActive == true
+            retryJob?.cancel()
+            stablePlaybackJob?.cancel()
+        } else if (resumeRetry && currentChannel != null) {
+            resumeRetry = false
+            currentChannel?.let { channel -> exoPlayer?.setMediaItem(MediaItem.fromUri(channel.url)) }
+            exoPlayer?.prepare()
+        }
         exoPlayer?.playWhenReady = playWhenReady
     }
 
+    fun playbackPosition(): Long? = exoPlayer?.takeIf { playbackAllowed && it.isPlaying }?.currentPosition
+
     fun stop() {
+        resumeRetry = false
         retryJob?.cancel()
         stablePlaybackJob?.cancel()
         exoPlayer?.stop()

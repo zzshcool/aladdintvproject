@@ -70,6 +70,7 @@ object M3uParser {
                             url = line,
                             type = streamType,
                             youtubeVideoId = youtubeId,
+                            liveChannelHandle = youtubeHandle(line),
                             label = qualityLabel,
                             tvgId = currentTvgId,
                             isGeoBlocked = isGeoBlocked,
@@ -120,7 +121,11 @@ object M3uParser {
         val matcher = EXTINF_TAG_PATTERN.matcher(line)
         if (matcher.find()) {
             val content = matcher.group(2) ?: ""
-            val commaIndex = content.lastIndexOf(',')
+            var quoted = false
+            val commaIndex = content.indexOfFirst { char ->
+                if (char == '"') quoted = !quoted
+                char == ',' && !quoted
+            }
 
             val attributesPart = if (commaIndex != -1) content.substring(0, commaIndex) else content
             val titlePart = if (commaIndex != -1) content.substring(commaIndex + 1).trim() else ""
@@ -164,14 +169,32 @@ object M3uParser {
         return ExtInfResult(chno, name, group, logo, tvgId)
     }
 
-    fun detectStreamType(url: String): Pair<StreamType, String?> {
-        val lower = url.lowercase()
-        if (lower.contains("youtube.com") || lower.contains("youtu.be")) {
-            val matcher = YOUTUBE_VIDEO_ID_PATTERN.matcher(url)
-            val videoId = if (matcher.find()) matcher.group(1) else null
-            return Pair(StreamType.YOUTUBE, videoId)
+    private fun youtubeUri(url: String): java.net.URI? {
+        val uri = try { java.net.URI(url) } catch (_: java.net.URISyntaxException) { return null }
+        val host = uri.host?.lowercase() ?: return null
+        return uri.takeIf {
+            it.scheme in listOf("https", "http") &&
+                (host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be")
         }
-        return Pair(StreamType.HLS, null)
+    }
+
+    private fun youtubeHandle(url: String): String? {
+        val uri = youtubeUri(url) ?: return null
+        val segments = uri.path.trim('/').split('/')
+        return segments.firstOrNull()?.takeIf {
+            it.startsWith("@") && it.length > 1 && segments.getOrNull(1) == "live"
+        }
+    }
+
+    fun detectStreamType(url: String): Pair<StreamType, String?> {
+        val uri = youtubeUri(url) ?: return StreamType.HLS to null
+        val segments = uri.path.trim('/').split('/')
+        val id = when {
+            uri.host.equals("youtu.be", true) -> segments.firstOrNull()
+            segments.firstOrNull() in listOf("live", "embed", "shorts") -> segments.getOrNull(1)
+            else -> uri.rawQuery?.split('&')?.firstOrNull { it.startsWith("v=") }?.substringAfter('=')
+        }?.takeIf { Regex("[A-Za-z0-9_-]{11}").matches(it) }
+        return StreamType.YOUTUBE to id
     }
 
     private fun extractQualityLabel(name: String): String? {

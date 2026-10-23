@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#000000</color>
     <color name="white">#FFFFFF</color>
     <color name="transparent">#00000000</color>
 
@@ -26,4 +25,7 @@
     <color name="status_red">#FF3B30</color>
     <color name="status_gray">#8E8E93</color>
     <color name="status_external">#5AC8FA</color>
+    <color name="accent_blue">#1765B5</color>
+    <color name="accent_green">#287A45</color>
+    <color name="accent_purple">#7750B4</color>
 </resources>

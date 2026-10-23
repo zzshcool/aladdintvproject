@@ -1,12 +1,9 @@
 <resources>
     <string name="app_name">阿拉丁TV</string>
-    <string name="loading_channels">正在載入台灣直播頻道列表…</string>
-    <string name="no_channels">無可用頻道，請檢查網路連線</string>
     <string name="buffering">緩衝載入中…</string>
     <string name="playback_error">播放異常，正在自動重試…</string>
     <string name="press_again_to_exit">再按一次退出阿拉丁TV</string>
     <string name="channel_format">CH %02d</string>
-    <string name="group_default">台灣頻道</string>
 
     <!-- 設定功能字串 -->
     <string name="settings">設定</string>
@@ -16,7 +13,6 @@
     <string name="theme_dark">深色模式</string>
     <string name="theme_light">淺色模式</string>
     <string name="refresh_channels">重新整理頻道清單</string>
-    <string name="refresh_channels_success">頻道清單已更新</string>
     <string name="close_settings">關閉設定</string>
 
     <!-- 狀態燈字串 -->
@@ -39,25 +35,17 @@
     <string name="source_status_success">清單下載與更新成功</string>
     <string name="source_status_fallback">遠端下載失敗，沿用快取</string>
     <string name="source_last_updated">最後更新：%s</string>
-    <string name="source_channels_count">有效頻道：%d 台</string>
 
     <!-- YouTube 內嵌播放與錯誤字串 -->
     <string name="youtube_error_embedded_disabled">該官方直播禁止在第三方應用嵌入播放 (錯誤代碼 150)</string>
-    <string name="youtube_error_video_not_found">該官方直播已結束或已設為私人影片 (錯誤代碼 100)</string>
-    <string name="youtube_error_153">缺少 Referer 或安全政策限制 (錯誤代碼 153)</string>
-    <string name="youtube_error_network">YouTube 網路載入異常，請檢查連線</string>
     <string name="youtube_error_timeout">YouTube 載入逾時無回應</string>
     <string name="youtube_error_web_watch_failed">官方網頁觀看模式無法在此裝置載入</string>
     <string name="youtube_autoplay_blocked">自動播放受阻，請按遙控器 OK 鍵或點擊螢幕播放</string>
-    <string name="youtube_error_generic">YouTube 播放失敗 (代碼 %d)</string>
     <string name="youtube_switching_web_watch">官方禁止嵌入 (150)，切換至官方網頁觀看…</string>
     <string name="youtube_status_web_watch">官方網頁觀看</string>
     <string name="btn_retry">重試連線</string>
-    <string name="btn_next_channel">切換下一台</string>
     <string name="btn_play_manual">按 OK 播放</string>
     <string name="status_all_sources_failed">所有備援來源已耗盡</string>
-    <string name="tag_geo_blocked">地區限制</string>
-    <string name="tag_part_time">非24H</string>
     <string name="touch_channels">頻道</string>
     <string name="touch_sources">線路</string>
     <string name="touch_settings">設定</string>
@@ -80,4 +68,44 @@
     <string name="touch_menu">播放選單</string>
     <string name="touch_fill">填滿</string>
     <string name="touch_fit">完整</string>
+    <string name="touch_menu_glyph">☰</string>
+    <string name="select_other_source">選擇其他線路</string>
+    <string name="watch_official_page">以官方網頁觀看</string>
+    <string name="return_channel_list">返回頻道列表</string>
+    <string name="live_label">LIVE</string>
+    <string name="number_jump_label">跳台：</string>
+    <string name="diagnostics_title">即時播放診斷</string>
+    <string name="fallback_settings_title">備援策略與資料管理</string>
+    <string name="auto_fallback_off">自動備援切換：已關閉 (手動主導)</string>
+    <string name="clear_web_data">清除網頁快取與登入資料</string>
+    <string name="web_interaction_hint">網頁操作模式中 · 按 [MENU] 或 [返回] 隨時返回電視控制</string>
+    <string name="source_selection_hint">移動焦點預覽，按 [OK] 切換線路，按 [返回] 取消</string>
+    <string name="close_source_panel">關閉面板 (保留原線路)</string>
+    <string name="channel_playing">● 播放中</string>
+    <string name="source_playing">目前播放</string>
+    <string name="source_counts">有效頻道：共 %1$d 台 (%2$d 條線路)</string>
+    <string name="drawer_counts">共 %1$d 台 (%2$d 條線路)</string>
+    <string name="diag_version">版本：v%1$s (Build %2$d · %3$s)</string>
+    <string name="diag_no_channel">%1$s\n頻道：無</string>
+    <string name="diag_quality_auto">4K策略：自動</string>
+    <string name="diag_channel">%1$s\n頻道：CH %2$02d %3$s</string>
+    <string name="diag_source">線路：%1$s (%2$d/%3$d)\n位址：%4$s</string>
+    <string name="diag_youtube_resolution">\n本次影片 ID：%1$s\n解析時間：%2$s</string>
+    <string name="diag_quality">4K策略：%1$s</string>
+    <string name="diag_result">結果：%1$s\n錯誤碼：%2$s\n最後驗證：%3$s | 成功：%4$s</string>
+    <string name="diag_last_failure">\n此線路最近失敗：%1$s</string>
+    <string name="retry_progress">正在進行自動重試 (%1$d/%2$d)…</string>
+    <string name="source_playback_error">【%1$s】%2$s</string>
+    <string name="playback_exhausted">播放失敗：%1$s\n(%2$s)</string>
+    <string name="playback_failure">播放失敗：%1$s</string>
+    <string name="osd_source">%1$s%2$s</string>
+    <string name="source_selection_title">%1$s · 線路清單 (%2$s)</string>
+    <string name="accent_setting">主題色</string>
+    <string name="accent_selected">主題色：%1$s</string>
+    <string-array name="accent_colors">
+        <item>金色</item>
+        <item>藍色</item>
+        <item>綠色</item>
+        <item>紫色</item>
+    </string-array>
 </resources>

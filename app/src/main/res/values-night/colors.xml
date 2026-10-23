@@ -12,4 +12,7 @@
     <color name="tv_text_highlight">#E5A93C</color>
     <color name="tv_badge_bg">#2A2E38</color>
     <color name="tv_overlay_bg">#CC121316</color>
+    <color name="accent_blue">#71B5FA</color>
+    <color name="accent_green">#70CD94</color>
+    <color name="accent_purple">#C09AF5</color>
 </resources>

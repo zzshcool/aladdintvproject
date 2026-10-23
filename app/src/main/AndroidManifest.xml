@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- 網路與喚醒權限 -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -14,20 +15,25 @@
         android:name="android.software.leanback"
         android:required="false" />
 
+    <!-- API 21–22 already permit HTTP; API 23+ uses this flag for existing HTTP TV sources. -->
     <application
         android:allowBackup="true"
         android:icon="@drawable/ic_launcher"
+        android:banner="@drawable/tv_banner"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.AladdinTV"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+        tools:ignore="UnusedAttribute">
 
+        <!-- TV playback intentionally uses either landscape rotation on phones and TV boxes. -->
         <activity
             android:name=".ui.MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="sensorLandscape">
+            android:screenOrientation="sensorLandscape"
+            tools:ignore="DiscouragedApi">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <!-- 手機端桌面啟動入口 -->

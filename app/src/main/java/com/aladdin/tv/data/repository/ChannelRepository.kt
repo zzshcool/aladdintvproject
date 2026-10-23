@@ -39,7 +39,21 @@ import org.json.JSONObject
  * 頻道資料儲存庫
  * 負責來源容錯、同名頻道多來源合併備援、來源狀態統計與獨立健康狀態管理
  */
-class ChannelRepository(private val context: Context) {
+class ChannelRepository private constructor(context: Context) {
+
+    enum class AccentColor { GOLD, BLUE, GREEN, PURPLE }
+
+    companion object {
+        @Volatile private var instance: ChannelRepository? = null
+
+        fun getInstance(context: Context): ChannelRepository = instance ?: synchronized(this) {
+            instance ?: ChannelRepository(context.applicationContext).also { instance = it }
+        }
+    }
+
+    private val filesDir = context.filesDir
+    private val refreshMutex = Mutex()
+    private var loaded = false
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(AppConfig.HTTP_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -49,10 +63,10 @@ class ChannelRepository(private val context: Context) {
         .build()
 
     private val cacheFileV2: File
-        get() = File(context.filesDir, AppConfig.CACHE_FILE_NAME_V2)
+        get() = File(filesDir, AppConfig.CACHE_FILE_NAME_V2)
 
     private val legacyCacheFile: File
-        get() = File(context.filesDir, AppConfig.CACHE_FILE_NAME)
+        get() = File(filesDir, AppConfig.CACHE_FILE_NAME)
 
     private val _channels = MutableStateFlow<List<Channel>>(emptyList())
     val channels: StateFlow<List<Channel>> = _channels.asStateFlow()
@@ -70,13 +84,10 @@ class ChannelRepository(private val context: Context) {
      */
     private val EXCLUDED_DEFUNCT_CHANNELS = setOf(
         "ctivariety.tw@sd",
-        "daai2.tw@sd",
         "ftv_gen",
         "good2.tw@sd",
         "goodtv.tw@sd",
         "cts_main",
-        "pts_main",
-        "pts_taiwan",
         "smart_knowledge",
         "longhua_drama",
         "longhua_japan_korea",
@@ -138,6 +149,8 @@ class ChannelRepository(private val context: Context) {
     private fun isDefunctExcludedChannel(channel: Channel): Boolean {
         if (prefs.getStringSet("manually_hidden_channels", emptySet())!!.contains(channel.canonicalId)) return true
         if (prefs.getStringSet("restored_channels", emptySet())!!.contains(channel.canonicalId)) return false
+        if (channel.streamSources.any { it.provider == "4gtv" && it.type == StreamType.WEB_VIEW &&
+                it.url.startsWith("https://www.4gtv.tv/channel/") }) return false
         val canon = channel.canonicalId.trim().lowercase().removePrefix("canon_").removePrefix("tvg_")
         if (canon in RECHECKED_OFIII_CHANNELS) return channel.streamSources.none { isOfiiiSource(it) }
         val rawId = channel.id.trim().lowercase().removePrefix("ch_").removePrefix("seed_")
@@ -164,8 +177,9 @@ class ChannelRepository(private val context: Context) {
     /**
      * 動態 YouTube 直播解析：透過頻道 handle (例如 @newsebc) 追蹤 /live 取得即時 Video ID
      */
-    suspend fun resolveYouTubeLiveVideoId(handle: String): String? = withContext(Dispatchers.IO) {
-        val cleanHandle = handle.trim()
+    suspend fun resolveYouTubeLiveVideoId(handle: String, channelKey: String? = null): String? = withContext(Dispatchers.IO) {
+        val cleanHandle = if (handle.equals("@DaAiVideo", ignoreCase = true) && channelKey in setOf("daai_1", "daai_2"))
+            "$handle:$channelKey" else handle.trim()
         if (cleanHandle.isBlank()) return@withContext null
         ytResolveLocks.getOrPut(cleanHandle) { Mutex() }.withLock {
             val now = System.currentTimeMillis()
@@ -179,7 +193,13 @@ class ChannelRepository(private val context: Context) {
                 } else {
                     java.net.URLEncoder.encode(cleanHandle, "UTF-8")
                 }
-                val targetUrl = "https://www.youtube.com/$encoded/live"
+                val daaiField = when (channelKey) {
+                    "daai_1" -> "Ch1TWYTID"
+                    "daai_2" -> "Ch3TWYTID"
+                    else -> null
+                }.takeIf { handle.equals("@DaAiVideo", ignoreCase = true) }
+                val targetUrl = if (daaiField != null) "https://daai.tv/channel/1"
+                    else "https://www.youtube.com/$encoded/live"
                 val request = Request.Builder()
                     .url(targetUrl)
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -204,10 +224,14 @@ class ChannelRepository(private val context: Context) {
                     })
                 }
                 run {
-                    if (response.first !in 200..299 || response.second.host !in setOf("www.youtube.com", "youtube.com")) return@withLock null
+                    val allowedHosts = if (daaiField != null) setOf("daai.tv", "www.daai.tv")
+                        else setOf("www.youtube.com", "youtube.com")
+                    if (response.first !in 200..299 || response.second.host !in allowedHosts) return@withLock null
                     val body = response.third
-                    val id = parseYouTubeLiveResponse(body, response.second.queryParameter("v"), cleanHandle)
-                        ?: return@withLock null
+                    val id = if (daaiField != null) {
+                        Regex("\"$daaiField\"\\s*:\"([A-Za-z0-9_-]{11})\"").find(body)?.groupValues?.get(1)
+                    } else parseYouTubeLiveResponse(body, response.second.queryParameter("v"), cleanHandle)
+                    if (id == null) return@withLock null
                     val resolvedAt = System.currentTimeMillis()
                     ytLiveCache[cleanHandle] = id to resolvedAt
                     prefs.edit().putString("yt_live_$cleanHandle", JSONObject().put("id", id).put("time", resolvedAt).toString()).apply()
@@ -221,7 +245,9 @@ class ChannelRepository(private val context: Context) {
         }
     }
 
-    fun getYouTubeResolution(handle: String): Pair<String, Long>? {
+    fun getYouTubeResolution(handle: String, channelKey: String? = null): Pair<String, Long>? {
+        if (handle.equals("@DaAiVideo", ignoreCase = true) && channelKey in setOf("daai_1", "daai_2"))
+            return getYouTubeResolution("$handle:$channelKey")
         val key = handle.trim()
         ytLiveCache[key]?.let { return it }
         return try {
@@ -232,7 +258,11 @@ class ChannelRepository(private val context: Context) {
         } catch (_: Exception) { null }
     }
 
-    fun invalidateYouTubeResolution(handle: String) {
+    fun invalidateYouTubeResolution(handle: String, channelKey: String? = null) {
+        if (handle.equals("@DaAiVideo", ignoreCase = true) && channelKey in setOf("daai_1", "daai_2")) {
+            invalidateYouTubeResolution("$handle:$channelKey")
+            return
+        }
         ytLiveCache.remove(handle.trim())
         prefs.edit().remove("yt_live_${handle.trim()}").apply()
     }
@@ -264,6 +294,7 @@ class ChannelRepository(private val context: Context) {
             .filter { isDefunctExcludedChannel(it) }
     }
 
+    @Synchronized
     fun restoreHiddenChannel(channel: Channel) {
         prefs.edit()
             .putStringSet("restored_channels", prefs.getStringSet("restored_channels", emptySet())!! + channel.canonicalId)
@@ -275,6 +306,7 @@ class ChannelRepository(private val context: Context) {
         saveToCache(merged)
     }
 
+    @Synchronized
     fun hideChannel(channel: Channel) {
         val archived = (getHiddenChannels() + channel).distinctBy { it.canonicalId }
         prefs.edit().putString("hidden_channel_archive", JSONArray(archived.map { it.toJson() }).toString())
@@ -310,6 +342,14 @@ class ChannelRepository(private val context: Context) {
             group = "宗教文化",
             tvgIds = listOf("DaAi1.tw", "daai1.tw"),
             nameAliases = listOf("大愛電視", "大愛一臺", "大愛一台", "大愛1台", "daai1")
+        ),
+        CanonicalChannelRule(
+            canonicalId = "daai_2",
+            defaultNumber = 96,
+            canonicalName = "大愛電視2台",
+            group = "宗教文化",
+            tvgIds = listOf("DaAi2.tw", "daai2.tw"),
+            nameAliases = listOf("大愛二臺", "大愛二台", "大愛2台", "大愛電視2台", "daai2")
         ),
         CanonicalChannelRule(
             canonicalId = "ctv_news",
@@ -493,16 +533,15 @@ class ChannelRepository(private val context: Context) {
      * 開機啟動初始化載入流程
      */
     suspend fun loadChannels() = withContext(Dispatchers.IO) {
-        val cachedChannels = readFromCache()
-        if (cachedChannels.isNotEmpty()) {
-            val merged = applyUserSelectedSources(mergeAndDeduplicate(getBuiltInSeedChannels(), cachedChannels))
-            _channels.value = merged
-            initHealthStatuses(merged)
-        } else {
-            val initialChannels = applyUserSelectedSources(mergeAndDeduplicate(getBuiltInSeedChannels()))
-            _channels.value = initialChannels
-            initHealthStatuses(initialChannels)
-            saveToCache(initialChannels)
+        synchronized(this@ChannelRepository) {
+            if (!loaded) {
+                val cachedChannels = readFromCache()
+                val initialChannels = applyUserSelectedSources(mergeAndDeduplicate(getBuiltInSeedChannels(), cachedChannels))
+                _channels.value = initialChannels
+                initHealthStatuses(initialChannels)
+                saveToCache(initialChannels)
+                loaded = true
+            }
         }
 
         // 背景非同步抓取最新清單
@@ -512,12 +551,14 @@ class ChannelRepository(private val context: Context) {
     /**
      * 從網路抓取最新 M3U 內容並驗證有效性
      */
-    suspend fun fetchAndRefreshFromRemote(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun fetchAndRefreshFromRemote(): Boolean = refreshMutex.withLock { refreshFromRemote() }
+
+    private suspend fun refreshFromRemote(): Boolean = withContext(Dispatchers.IO) {
         var defaultSuccess = false
         var backupSuccess = false
 
         val defaultContent = downloadM3u(AppConfig.DEFAULT_M3U_URL)
-        val nowBatch = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+        val nowBatch = java.util.UUID.randomUUID().toString()
 
         val defaultChannels = if (isValidM3uContent(defaultContent)) {
             val parsed = M3uParser.parse(defaultContent!!)
@@ -555,7 +596,7 @@ class ChannelRepository(private val context: Context) {
         val isAnyRemoteSuccess = defaultSuccess || backupSuccess
         val nowStr = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault()).format(Date())
 
-        if (isAnyRemoteSuccess) {
+        if (isAnyRemoteSuccess) synchronized(this@ChannelRepository) {
             val current = _channels.value
 
             // 分別管理 remote_default 與 remote_backup 的過期淘汰：
@@ -626,7 +667,7 @@ class ChannelRepository(private val context: Context) {
 
         // 提取歷史播放經驗 ( failureCount 與 lastSuccessTime )，確保新來源 metadata 不覆蓋歷史經驗
         val historyStats = mutableMapOf<String, Pair<Int, Long>>()
-        for (list in channelLists) {
+        for (list in channelLists.asList() + listOf(_channels.value)) {
             for (ch in list) {
                 for (src in ch.streamSources) {
                     if (src.failureCount > 0 || src.lastSuccessTime > 0L) {
@@ -640,7 +681,12 @@ class ChannelRepository(private val context: Context) {
         }
 
         for (list in channelLists) {
-            for (ch in list) {
+            for (original in list) {
+                val ch = if (original.canonicalId == "daai_1") original.copy(
+                    streamSources = original.streamSources.filterNot {
+                        it.liveChannelHandle == "@DaAiWorldNews" || it.url.contains("@DaAiWorldNews/")
+                    }
+                ) else original
                 val (primaryKey, canonicalRule) = resolveChannelIdentity(ch)
                 val cleanName = normalizeChannelKey(ch.name)
 
@@ -737,7 +783,7 @@ class ChannelRepository(private val context: Context) {
 
         // 重新分配嚴格唯一、確定性之頻道台號，不更動頻道 ID，並排除所有線路確認失效之頻道
         val checkedSeedsByUrl = getBuiltInSeedChannels().filter { it.canonicalId in RECHECKED_OFIII_CHANNELS }
-            .flatMap { channel -> channel.streamSources.filter { isOfiiiSource(it) }.map { it.url to channel } }.toMap()
+            .flatMap { channel -> channel.streamSources.filter { isOfiiiSource(it) || it.provider == "4gtv" }.map { it.url to channel } }.toMap()
         val normalized = uniqueMap.values.map { channel ->
             val checked = channel.streamSources.firstNotNullOfOrNull { checkedSeedsByUrl[it.url] }
             if (checked != null) channel.copy(
@@ -754,7 +800,7 @@ class ChannelRepository(private val context: Context) {
         val restoredIds = mutableSetOf<String>()
         val filtered = normalized.filterNot { isDefunctExcludedChannel(it) }.map { channel ->
             if (channel.canonicalId in RECHECKED_OFIII_CHANNELS) {
-                channel.copy(streamSources = channel.streamSources.filter { isOfiiiSource(it) })
+                channel.copy(streamSources = channel.streamSources.filter { isOfiiiSource(it) || it.provider == "4gtv" })
             } else channel
         }.filter { it.streamSources.isNotEmpty() }
             .filter { it.canonicalId !in RECHECKED_OFIII_CHANNELS || restoredIds.add(it.canonicalId) }
@@ -773,8 +819,18 @@ class ChannelRepository(private val context: Context) {
         val result = mutableListOf<Channel>()
         val unassigned = mutableListOf<Channel>()
 
+        val savedNumbers = try {
+            JSONObject(prefs.getString("stable_channel_numbers", "{}") ?: "{}")
+        } catch (_: Exception) { JSONObject() }
+        val newChannels = mutableListOf<Channel>()
+        for (channel in channels) {
+            val saved = savedNumbers.optInt(channel.canonicalId, 0)
+            if (saved > 0 && usedNumbers.add(saved)) result.add(channel.copy(number = saved))
+            else newChannels.add(channel)
+        }
+
         // 1. 先固定所有規範頻道專屬台號
-        for (ch in channels) {
+        for (ch in newChannels) {
             val rule = CANONICAL_RULES.firstOrNull { it.canonicalId == ch.canonicalId }
             if (rule != null && !usedNumbers.contains(rule.defaultNumber)) {
                 usedNumbers.add(rule.defaultNumber)
@@ -806,31 +862,33 @@ class ChannelRepository(private val context: Context) {
             nextAvailableNum++
         }
 
+        for (channel in result) savedNumbers.put(channel.canonicalId, channel.number)
+        prefs.edit().putString("stable_channel_numbers", savedNumbers.toString()).apply()
         // 依台號由小至大排序
         return result.sortedBy { it.number }
     }
 
     private fun sortSourcesByHealth(sources: List<StreamSource>): List<StreamSource> {
         return sources.sortedBy { src ->
-            val memFail = sourceFailureCount.getOrDefault(src.url, 0)
+            val memFail = (sourceFailureCount[src.url] ?: 0)
             val srcFail = src.failureCount
             maxOf(memFail, srcFail)
         }
     }
 
+    @Synchronized
     fun recordSourceFailure(url: String, reason: String? = null) {
         if (url.isBlank()) return
-        if (reason != null) {
-            prefs.edit()
-                .putString("source_failure_reason_${android.net.Uri.encode(url)}", reason)
-                .putLong("source_failure_time_${android.net.Uri.encode(url)}", System.currentTimeMillis())
-                .apply()
-        }
-        val count = sourceFailureCount.getOrDefault(url, 0)
+        prefs.edit()
+            .putString("source_failure_reason_${android.net.Uri.encode(url)}", reason ?: "播放失敗")
+            .putLong("source_failure_time_${android.net.Uri.encode(url)}", System.currentTimeMillis())
+            .apply()
+        val count = (sourceFailureCount[url] ?: 0)
         sourceFailureCount[url] = count + 1
         updateSourceStats(url, isSuccess = false)
     }
 
+    @Synchronized
     fun recordSourceSuccess(url: String) {
         if (url.isBlank()) return
         sourceFailureCount[url] = 0
@@ -839,6 +897,9 @@ class ChannelRepository(private val context: Context) {
 
     fun getSourceLastFailure(url: String): String? =
         prefs.getString("source_failure_reason_${android.net.Uri.encode(url)}", null)
+
+    fun getSourceFailure(url: String): Pair<Long, String?> =
+        prefs.getLong("source_failure_time_${android.net.Uri.encode(url)}", 0L) to getSourceLastFailure(url)
 
     private fun updateSourceStats(url: String, isSuccess: Boolean) {
         val currentChannels = _channels.value
@@ -923,6 +984,7 @@ class ChannelRepository(private val context: Context) {
             .lowercase()
     }
 
+    @Synchronized
     private fun initHealthStatuses(channelList: List<Channel>) {
         val currentMap = _healthMap.value.toMutableMap()
         val now = System.currentTimeMillis()
@@ -941,6 +1003,7 @@ class ChannelRepository(private val context: Context) {
         _healthMap.value = currentMap
     }
 
+    @Synchronized
     fun updateChannelHealth(channelId: String, status: ChannelHealthStatus, message: String? = null, sourceIndex: Int = 0, totalSources: Int = 1) {
         val currentMap = _healthMap.value.toMutableMap()
         currentMap[channelId] = ChannelHealth(
@@ -970,6 +1033,7 @@ class ChannelRepository(private val context: Context) {
     /**
      * 定期掃描過期狀態，將逾 15 分鐘之記錄轉為灰燈
      */
+    @Synchronized
     fun scanExpiredHealthStatuses() {
         val now = System.currentTimeMillis()
         val currentMap = _healthMap.value.toMutableMap()
@@ -1011,7 +1075,7 @@ class ChannelRepository(private val context: Context) {
         if (listV2.isNotEmpty()) return listV2
 
         // 2. 若主快取異常，嘗試讀取 .bak 備份快取
-        val bakFile = File(context.filesDir, "${AppConfig.CACHE_FILE_NAME_V2}.bak")
+        val bakFile = File(filesDir, "${AppConfig.CACHE_FILE_NAME_V2}.bak")
         val listBak = parseCacheFile(bakFile).filterNot { isDefunctExcludedChannel(it) }
         if (listBak.isNotEmpty()) return listBak
 
@@ -1036,7 +1100,9 @@ class ChannelRepository(private val context: Context) {
     private fun parseCacheFile(file: File): List<Channel> {
         try {
             if (file.exists() && file.length() > 0) {
-                val content = file.readText(Charsets.UTF_8)
+                val content = if (file == cacheFileV2) {
+                    android.util.AtomicFile(file).openRead().bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } else file.readText(Charsets.UTF_8)
                 val jsonArray = JSONArray(content)
                 val list = mutableListOf<Channel>()
                 for (i in 0 until jsonArray.length()) {
@@ -1054,39 +1120,42 @@ class ChannelRepository(private val context: Context) {
     /**
      * 快取採可恢復的替換流程：寫入臨時檔 -> 備份現有快取至 .bak -> 替換 -> 失敗時自動還原
      */
+    private val cacheWriter = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "channel-cache-writer").apply { isDaemon = true }
+    }
+
+    private val pendingCache = java.util.concurrent.atomic.AtomicReference<List<Channel>?>(null)
+    private var cacheWriteScheduled = false
+
+    @Synchronized
     private fun saveToCache(channels: List<Channel>) {
-        if (channels.isEmpty()) return
+        pendingCache.set(channels)
+        if (cacheWriteScheduled) return
+        cacheWriteScheduled = true
+        cacheWriter.execute {
+            while (true) {
+                val snapshot = synchronized(this) {
+                    val next = pendingCache.getAndSet(null)
+                    if (next == null) cacheWriteScheduled = false
+                    next
+                } ?: break
+                writeCacheSnapshot(snapshot)
+            }
+        }
+    }
+
+    private fun writeCacheSnapshot(channels: List<Channel>) {
+        val file = android.util.AtomicFile(cacheFileV2)
+        var output: FileOutputStream? = null
         try {
-            val jsonArray = JSONArray()
-            for (ch in channels) {
-                jsonArray.put(ch.toJson())
-            }
-            val tmpFile = File(context.filesDir, "${AppConfig.CACHE_FILE_NAME_V2}.tmp")
-            val bakFile = File(context.filesDir, "${AppConfig.CACHE_FILE_NAME_V2}.bak")
-
-            FileOutputStream(tmpFile).use { fos ->
-                fos.write(jsonArray.toString(2).toByteArray(Charsets.UTF_8))
-                fos.flush()
-                try { fos.fd.sync() } catch (_: Exception) {}
-            }
-
-            if (tmpFile.exists() && tmpFile.length() > 0) {
-                if (cacheFileV2.exists()) {
-                    if (bakFile.exists()) bakFile.delete()
-                    cacheFileV2.renameTo(bakFile)
-                }
-                val renamed = tmpFile.renameTo(cacheFileV2)
-                if (renamed) {
-                    if (bakFile.exists()) bakFile.delete()
-                } else {
-                    // rename 失敗時從 .bak 還原
-                    if (bakFile.exists()) {
-                        bakFile.renameTo(cacheFileV2)
-                    }
-                    tmpFile.delete()
-                }
-            }
-        } catch (_: Exception) {}
+            val jsonArray = JSONArray(channels.map { it.toJson() })
+            output = file.startWrite()
+            output.write(jsonArray.toString().toByteArray(Charsets.UTF_8))
+            file.finishWrite(output)
+        } catch (error: Exception) {
+            file.failWrite(output)
+            android.util.Log.e("ChannelRepository", "Channel cache write failed: ${error.javaClass.simpleName}")
+        }
     }
 
     /**
@@ -1150,6 +1219,10 @@ class ChannelRepository(private val context: Context) {
     fun getLastChannelId(): String? = prefs.getString(AppConfig.PREF_LAST_CHANNEL_ID, null)
     fun getLastChannelUrl(): String? = prefs.getString(AppConfig.PREF_LAST_CHANNEL_URL, null)
 
+    fun saveAccentColor(color: AccentColor) = prefs.edit().putString("accent_color", color.name).apply()
+    fun getSavedAccentColor(): AccentColor =
+        AccentColor.entries.firstOrNull { it.name == prefs.getString("accent_color", null) } ?: AccentColor.GOLD
+
     fun saveTheme(themeMode: Int) = prefs.edit().putInt(AppConfig.PREF_APP_THEME, themeMode).apply()
     fun getSavedTheme(): Int = prefs.getInt(AppConfig.PREF_APP_THEME, AppConfig.THEME_SYSTEM)
 
@@ -1172,6 +1245,7 @@ class ChannelRepository(private val context: Context) {
         return prefs.getString("${AppConfig.PREF_USER_SELECTED_SOURCE_PREFIX}$channelKey", null)
     }
 
+    @Synchronized
     fun saveUserSelectedSource(channelKey: String, sourceId: String) {
         prefs.edit().putString("${AppConfig.PREF_USER_SELECTED_SOURCE_PREFIX}$channelKey", sourceId).apply()
     }
@@ -1210,6 +1284,36 @@ class ChannelRepository(private val context: Context) {
     private fun getBuiltInSeedChannels(): List<Channel> {
         val seeds = listOf(
             Channel(
+                id = "seed_daai_2", canonicalId = "daai_2", number = 96,
+                name = "大愛電視2台", group = "宗教文化", tvgId = "DaAi2.tw",
+                streamSources = listOf(StreamSource(
+                    url = "https://www.youtube.com/watch?v=OKvWtVoDR8I",
+                    type = StreamType.YOUTUBE, youtubeVideoId = "OKvWtVoDR8I",
+                    liveChannelHandle = "@DaAiVideo", label = "YouTube官方直播",
+                    tvgId = "DaAi2.tw", originLabel = "YouTube官方直播"
+                ))
+            ),
+            Channel(
+                id = "seed_pts_main", canonicalId = "pts_main", number = 13,
+                name = "公視主頻", group = "公共電視", tvgId = "PTS.tw",
+                streamSources = listOf(StreamSource(
+                    url = "https://www.youtube.com/watch?v=C6gYqSHLRw4",
+                    type = StreamType.YOUTUBE, youtubeVideoId = "C6gYqSHLRw4",
+                    liveChannelHandle = "@ptslivestream", label = "YouTube官方直播",
+                    tvgId = "PTS.tw", originLabel = "YouTube官方直播"
+                ))
+            ),
+            Channel(
+                id = "seed_pts_taiwan", canonicalId = "pts_taiwan", number = 14,
+                name = "公視台語台", group = "公共電視", tvgId = "PTSTaigi.tw",
+                streamSources = listOf(StreamSource(
+                    url = "https://www.youtube.com/watch?v=6KlRR_DGhmI",
+                    type = StreamType.YOUTUBE, youtubeVideoId = "6KlRR_DGhmI",
+                    liveChannelHandle = "@ptstaigitai", label = "YouTube官方直播",
+                    tvgId = "PTSTaigi.tw", originLabel = "YouTube官方直播"
+                ))
+            ),
+            Channel(
                 id = "seed_daai_1",
                 canonicalId = "daai_1",
                 number = 9,
@@ -1217,10 +1321,10 @@ class ChannelRepository(private val context: Context) {
                 group = "宗教文化",
                 streamSources = listOf(
                     StreamSource(
-                        url = "https://www.youtube.com/@DaAiWorldNews/live",
+                        url = "https://www.youtube.com/watch?v=oV_i3Hsl_zg",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "S-IRquSID3g",
-                        liveChannelHandle = "@DaAiWorldNews",
+                        youtubeVideoId = "oV_i3Hsl_zg",
+                        liveChannelHandle = "@DaAiVideo",
                         label = "YouTube官方 24H",
                         tvgId = "DaAi1.tw",
                         originLabel = "YouTube官方直播"
@@ -1588,6 +1692,7 @@ class ChannelRepository(private val context: Context) {
             )
         )
         val ofiiiPages = mapOf(
+            "set_news" to "setnews",
             "ctv_news" to "4gtv-4gtv074",
             "cts_main" to "4gtv-4gtv041",
             "cts_news" to "4gtv-4gtv052",
@@ -1658,7 +1763,94 @@ class ChannelRepository(private val context: Context) {
             ofiiiChannel("smart_knowledge", 37, "Smart知識台", "生活學習", "litv-xinchuang19"),
             ofiiiChannel("ofiii_focus_knowledge", 82, "Focus探索新知台", "生活學習", "ofiii82")
         )
-        return allSeeds
+        val additionalTvChannels = listOf(
+            ofiiiChannel("eltv", 20, "ELTV生活英語台", "生活學習", "litv-xinchuang20"),
+            ofiiiChannel("longhua_cartoon", 21, "龍華卡通台", "卡通兒童", "litv-xinchuang01"),
+            ofiiiChannel("taiwan_drama", 41, "台灣戲劇台", "戲劇", "litv-xinchuang22"),
+            ofiiiChannel("ebc_shop1", 43, "東森購物1台", "購物", "4gtv-4gtv102"),
+            ofiiiChannel("longhua_idol", 45, "龍華偶像台", "戲劇", "litv-xinchuang12"),
+            ofiiiChannel("ebc_shop2", 49, "東森購物2台", "購物", "4gtv-4gtv103"),
+            ofiiiChannel("global_news", 63, "寰宇新聞台", "新聞時事", "litv-longturn14"),
+            ofiiiChannel("first_business", 65, "第1商業台", "新聞時事", "4gtv-4gtv104"),
+            ofiiiChannel("parliament_1", 66, "國會頻道1台", "新聞時事", "4gtv-4gtv084"),
+            ofiiiChannel("parliament_2", 67, "國會頻道2台", "新聞時事", "4gtv-4gtv085")
+        ).map { channel ->
+            if (channel.canonicalId != "global_news") channel else channel.copy(
+                streamSources = channel.streamSources + StreamSource(
+                    url = "https://www.youtube.com/@globalnewstw/live",
+                    type = StreamType.YOUTUBE, youtubeVideoId = "Y8eZYHy8BDc",
+                    liveChannelHandle = "@globalnewstw", label = "YouTube官方直播",
+                    tvgId = "GlobalNews.tw", originLabel = "YouTube官方直播"
+                )
+            )
+        }
+        val fourgtvChannels = """
+            ftv_one|4|民視第一台|無線綜合|/channel/4gtv-4gtv003?set=1&ch=1
+            ftv_taiwan|5|民視台灣台|無線綜合|/channel/4gtv-4gtv001?set=1&ch=2
+            ftv_gen|6|民視|無線綜合|/channel/4gtv-4gtv002?set=1&ch=3
+            daai_1|9|大愛電視|宗教文化|/channel/4gtv-live007?set=1&ch=209
+            ctv_main|10|中視|無線綜合|/channel/4gtv-4gtv040?set=1&ch=4
+            cts_main|12|華視|無線綜合|/channel/4gtv-4gtv041?set=1&ch=6
+            set_general|13|三立綜合台|綜藝娛樂|/channel/4gtv-live207?set=1&ch=169
+            hakka_tv|14|客家電視台|公共電視|/channel/4gtv-4gtv043?set=1&ch=107
+            gtv_variety|15|八大綜藝台|綜藝娛樂|/channel/4gtv-4gtv039?set=1&ch=114
+            tvbs_jingcai|17|TVBS精采台|綜藝娛樂|/channel/4gtv-4gtv067?set=1&ch=227
+            jingtian_general|19|靖天綜合台|綜藝娛樂|/channel/4gtv-4gtv046?set=1&ch=21
+            jingtian_japan|20|靖天日本台|戲劇|/channel/4gtv-4gtv047?set=1&ch=22
+            titv|25|原住民族電視台|公共電視|/channel/4gtv-4gtv080?set=1&ch=124
+            liveabc|30|LiveABC互動英語頻道|生活學習|/channel/4gtv-live030?set=1&ch=188
+            eltv|32|ELTV生活英語台|生活學習|/channel/litv-xinchuang20?set=1&ch=490
+            jingtian_cartoon|36|靖天卡通台|卡通兒童|/channel/4gtv-4gtv044?set=1&ch=15
+            jingyang_cartoon|37|靖洋卡通Nice Bingo|卡通兒童|/channel/4gtv-4gtv057?set=1&ch=59
+            momo_kids|42|MOMO親子台|卡通兒童|/channel/4gtv-live107?set=1&ch=231
+            mirror_news|50|鏡電視新聞台|新聞時事|/channel/4gtv-4gtv075?set=1&ch=268
+            ebc_news|51|東森新聞台|新聞時事|/channel/4gtv-4gtv152?set=1&ch=292
+            cts_news|52|華視新聞|新聞時事|/channel/4gtv-4gtv052?set=1&ch=34
+            ftv_news|53|民視新聞台|新聞時事|/channel/litv-ftv13?set=1&ch=31
+            set_inews|54|三立新聞iNEWS|新聞時事|/channel/4gtv-live089?set=1&ch=229
+            tvbs_news|55|TVBS新聞|新聞時事|/channel/media-live072?set=1&ch=473
+            ebc_fin_news|56|東森財經新聞台|新聞時事|/channel/4gtv-4gtv153?set=1&ch=293
+            ctv_news|57|中視新聞|新聞時事|/channel/4gtv-4gtv074?set=1&ch=33
+            global_news|60|寰宇新聞台|新聞時事|/channel/litv-longturn14?set=1&ch=36
+            global_taiwan|61|寰宇新聞台灣台|新聞時事|/channel/4gtv-4gtv156?set=1&ch=280
+            global_finance|63|寰宇財經台|新聞時事|/channel/4gtv-4gtv158?set=1&ch=281
+            tvbs_main|67|TVBS|新聞時事|/channel/media-live073?set=1&ch=472
+            tvbs_entertainment|77|TVBS歡樂台|綜藝娛樂|/channel/4gtv-4gtv068?set=1&ch=184
+            zilin_sports|106|智林體育台|體育運動|/channel/4gtv-4gtv101?set=1&ch=58
+            asia_travel|113|亞洲旅遊台|生活旅遊|/channel/4gtv-4gtv076?set=1&ch=250
+            happy_home|115|幸福空間居家台|生活旅遊|/channel/4gtv-4gtv064?set=1&ch=123
+            elta_living|120|愛爾達生活旅遊台|生活旅遊|/channel/4gtv-live120?set=1&ch=237
+            goodtv_1|160|好消息|宗教人文|/channel/litv-ftv16?set=1&ch=9
+            goodtv_2|161|好消息2台|宗教人文|/channel/litv-ftv17?set=1&ch=8
+            daai_2|163|大愛二台|宗教文化|/channel/4gtv-live106?set=1&ch=230
+            abc_australia|167|ABC Australia 澳洲公廣頻道|國際頻道|/channel/4gtv-live167?set=1&ch=498
+            nhk_world|168|NHK WORLD-JAPAN|國際頻道|/channel/4gtv-live168?set=1&ch=461
+            france24_en|169|FRANCE24 英文台|國際頻道|/channel/4gtv-live146?set=1&ch=316
+            aljazeera_en|170|半島國際新聞台|國際頻道|/channel/4gtv-live157?set=1&ch=462
+            cnbc_asia|172|CNBC Asia 財經台|國際頻道|/channel/4gtv-live130?set=1&ch=235
+            dw_tv|173|DW德國之聲|國際頻道|/channel/4gtv-live071?set=1&ch=226
+            parliament_1|185|國會頻道1|新聞時事|/channel/4gtv-4gtv084?set=1&ch=170
+            parliament_2|186|國會頻道2|新聞時事|/channel/4gtv-4gtv085?set=1&ch=171
+        """.trimIndent().lineSequence().filter { it.isNotBlank() }.map { line ->
+            val fields = line.split('|', limit = 5)
+            Channel(
+                id = "seed_${fields[0]}", canonicalId = fields[0], number = fields[1].toInt(),
+                name = fields[2], group = fields[3],
+                streamSources = listOf(StreamSource(
+                    url = "https://www.4gtv.tv${fields[4]}",
+                    type = StreamType.WEB_VIEW, label = "四季線上官方", provider = "4gtv",
+                    originLabel = "四季線上官方觀看頁"
+                ))
+            )
+        }.toList()
+        val fourgtvById = fourgtvChannels.associateBy { it.canonicalId }
+        val existing = allSeeds + additionalTvChannels
+        val augmentedTvChannels = existing.map { channel ->
+            val official = fourgtvById[channel.canonicalId]
+            if (official == null) channel else channel.copy(streamSources = channel.streamSources + official.streamSources)
+        }
+        val existingIds = existing.map { it.canonicalId }.toSet()
+        return augmentedTvChannels + fourgtvChannels.filter { it.canonicalId !in existingIds }
     }
 
     private fun channelsToM3u(channels: List<Channel>): String {
@@ -1698,8 +1890,11 @@ internal fun parseYouTubeLiveResponse(body: String, redirectedId: String?, handl
         val microformat = player.optJSONObject("microformat")?.optJSONObject("playerMicroformatRenderer")
         val live = microformat?.optJSONObject("liveBroadcastDetails")
         val id = details.optString("videoId")
-        val ownerHandle = microformat?.optString("ownerProfileUrl")
-            ?.removePrefix("https://www.youtube.com/")?.trimEnd('/')
+        val ownerHandle = microformat?.optString("ownerProfileUrl")?.let { url ->
+            val owner = java.net.URI(url)
+            if (owner.scheme in setOf("http", "https") && owner.host in setOf("www.youtube.com", "youtube.com"))
+                owner.path.removePrefix("/").trimEnd('/') else null
+        }
         val requestedHandle = java.net.URLDecoder.decode(handle, "UTF-8")
         val ownerMatches = ownerHandle != null && java.net.URLDecoder.decode(ownerHandle, "UTF-8")
             .equals(requestedHandle, ignoreCase = true)

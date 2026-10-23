@@ -20,6 +20,7 @@ import com.aladdin.tv.data.model.ChannelHealthStatus
 import com.aladdin.tv.data.model.StreamType
 import com.aladdin.tv.data.repository.ChannelRepository
 import com.aladdin.tv.databinding.ActivityMainBinding
+import com.aladdin.tv.databinding.PanelSettingsBinding
 import com.aladdin.tv.player.AladdinPlayerManager
 import com.aladdin.tv.player.PlayerState
 import com.aladdin.tv.ui.adapter.ChannelAdapter
@@ -46,11 +47,16 @@ class MainActivity : AppCompatActivity() {
         FULLSCREEN        // 網頁全螢幕模式
     }
 
+    private var settingsBinding: PanelSettingsBinding? = null
+    private val settings: PanelSettingsBinding get() = checkNotNull(settingsBinding)
     private lateinit var binding: ActivityMainBinding
     private lateinit var repository: ChannelRepository
     private lateinit var playerManager: AladdinPlayerManager
     private lateinit var channelAdapter: ChannelAdapter
     private lateinit var sourceAdapter: SourceAdapter
+
+    private var isForeground = false
+    private var pendingPlayback: (() -> Unit)? = null
 
     private var currentControlMode: TvControlMode = TvControlMode.TV_APP
     private var currentChannelList = listOf<Channel>()
@@ -65,7 +71,10 @@ class MainActivity : AppCompatActivity() {
     private var confirmedWebAttemptId = -1L
     private var webAdAttemptId = -1L
     private var webAdPlaying = false
+    private var adWatchdogJob: Job? = null
     private val triedSourceIds = mutableSetOf<String>()
+    private val failedSourceIds = mutableSetOf<String>()
+    private var lastWebProgressAt = 0L
 
     // 播放診斷與監控狀態
     private var lastDiagAttemptResult: String = "尚未起播"
@@ -104,7 +113,7 @@ class MainActivity : AppCompatActivity() {
         val visiblePanels = buildString {
             if (binding.layoutDrawer.isVisible) append("Drawer,")
             if (binding.layoutSourceSelection.isVisible) append("SourceSelect,")
-            if (binding.layoutSettings.isVisible) append("Settings,")
+            if ((settingsBinding?.root?.isVisible == true)) append("Settings,")
             if (binding.layoutYoutubeError.isVisible) append("YtError,")
             if (binding.layoutError.isVisible) append("ExoError,")
             if (binding.layoutOsd.isVisible) append("Osd,")
@@ -119,8 +128,15 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        repository = ChannelRepository(this)
+        repository = ChannelRepository.getInstance(this)
         applySavedTheme()
+        val accentStyle = when (repository.getSavedAccentColor()) {
+            ChannelRepository.AccentColor.GOLD -> R.style.AladdinAccentGold
+            ChannelRepository.AccentColor.BLUE -> R.style.AladdinAccentBlue
+            ChannelRepository.AccentColor.GREEN -> R.style.AladdinAccentGreen
+            ChannelRepository.AccentColor.PURPLE -> R.style.AladdinAccentPurple
+        }
+        theme.applyStyle(accentStyle, true)
 
         SystemUiUtils.hideSystemBars(window)
 
@@ -131,8 +147,13 @@ class MainActivity : AppCompatActivity() {
         playerManager.setQualityPreference(repository.getSavedQualityPref())
 
         initViews()
+        binding.rootContainer.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if (right - left != oldRight - oldLeft) applyResponsiveLayout(right - left)
+        }
+        binding.rootContainer.post { applyResponsiveLayout(binding.rootContainer.width) }
         initYouTubePlayer()
-        initSettingsPanel()
+        binding.btnFavoriteList.setOnClickListener { showSavedChannels(false) }
+        binding.btnRecentChannels.setOnClickListener { showSavedChannels(true) }
         initGestureDetector()
         observeData()
         startHealthExpiryScanner()
@@ -140,28 +161,50 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             repository.loadChannels()
         }
+        if (savedInstanceState?.getBoolean("settings_open") == true) showSettingsPanel()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("settings_open", settingsBinding?.root?.isVisible == true)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
         super.onResume()
+        isForeground = true
+        binding.youtubePlayerView.resumeVideo()
         SystemUiUtils.hideSystemBars(window)
-        playerManager.setPlayWhenReady(true)
+        playerManager.setPlayWhenReady(currentPlayingChannel?.currentSource?.type == StreamType.HLS || currentPlayingChannel == null)
+        pendingPlayback?.let { pending ->
+            pendingPlayback = null
+            pending()
+            return
+        }
         val channel = currentPlayingChannel
         if (channel != null) {
-            if (channel.streamType == StreamType.YOUTUBE || channel.currentSource?.type == StreamType.WEB_VIEW) {
-                binding.youtubePlayerView.resumeVideo()
-            }
             // 恢復前台時重新建立有期限的播放監測，不因背景暫停扣除來源健康分數
-            startBufferingWatchdog(channel, currentAttemptId)
+            if (webAdPlaying) startAdWatchdog(channel, currentAttemptId)
+            else if (confirmedWebAttemptId != currentAttemptId)
+                startBufferingWatchdog(channel, currentAttemptId)
         }
     }
 
     override fun onPause() {
+        isForeground = false
+        if (youtubeResolveJob?.isActive == true) {
+            val channel = currentPlayingChannel
+            youtubeResolveJob?.cancel()
+            if (channel != null) pendingPlayback = {
+                playChannelStream(channel, channel.currentSourceIndex, false, refreshingLiveId = true)
+            }
+        }
         super.onPause()
         // 進入背景時暫停相關監測與工作，避免扣除來源健康分數
         bufferingWatchdogJob?.cancel()
         webWatchWatchdogJob?.cancel()
         ytStablePlaybackJob?.cancel()
+        adWatchdogJob?.cancel()
+        confirmedWebAttemptId = -1L
 
         playerManager.setPlayWhenReady(false)
         if (currentPlayingChannel?.streamType == StreamType.YOUTUBE || currentPlayingChannel?.currentSource?.type == StreamType.WEB_VIEW) {
@@ -170,7 +213,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        pendingPlayback = null
         youtubeResolveJob?.cancel()
+        adWatchdogJob?.cancel()
         super.onDestroy()
         touchControlsDismissJob?.cancel()
         osdDismissJob?.cancel()
@@ -193,6 +238,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun applyResponsiveLayout(width: Int) {
+        if (width <= 0) return
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        val available = (width - dp(24)).coerceAtLeast(1)
+        for ((view, maxWidth) in listOfNotNull(
+            binding.layoutDrawer to 350, settingsBinding?.root?.let { it to 400 },
+            binding.layoutSourceSelection to 420, binding.layoutYoutubeError to 800,
+            binding.layoutError to 800
+        )) {
+            view.layoutParams = view.layoutParams.apply { this.width = minOf(dp(maxWidth), available) }
+        }
+        val compact = width / density / resources.configuration.fontScale < 800
+        for (row in listOf(binding.layoutYoutubeErrorActions, binding.layoutNativeErrorActions)) {
+            row.orientation = if (compact) android.widget.LinearLayout.VERTICAL else android.widget.LinearLayout.HORIZONTAL
+            for (index in 0 until row.childCount) {
+                val child = row.getChildAt(index)
+                child.minimumHeight = dp(48)
+                child.layoutParams = (child.layoutParams as android.widget.LinearLayout.LayoutParams).apply {
+                    this.width = if (compact) android.view.ViewGroup.LayoutParams.MATCH_PARENT else android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                    marginStart = if (compact || index == 0) 0 else dp(8)
+                }
+            }
+        }
+        binding.layoutOsd.setPadding(dp(if (compact) 16 else 36), dp(if (compact) 16 else 48), dp(if (compact) 16 else 36), dp(if (compact) 12 else 24))
+        binding.tvOsdChannelNum.textSize = if (compact) 22f else 32f
+        binding.tvOsdChannelName.textSize = if (compact) 18f else 22f
+        binding.tvOsdTime.textSize = if (compact) 16f else 20f
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun applyVideoScale() {
         binding.playerView.resizeMode = if (fillScreen)
             androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -220,20 +296,22 @@ class MainActivity : AppCompatActivity() {
     private fun initViews() {
         playerManager.attachPlayerView(binding.playerView)
 
-        playerManager.onChannelHealthChanged = { channelId, status, message ->
+        playerManager.onChannelHealthChanged = health@{ channelId, status, message ->
+            if (!isForeground || channelId != currentPlayingChannel?.id) return@health
             currentPlayingChannel?.let { ch ->
                 repository.updateChannelHealth(channelId, status, message, ch.currentSourceIndex, ch.streamSources.size)
             } ?: repository.updateChannelHealth(channelId, status, message)
         }
 
         playerManager.onExoPlayerSourceFailed = { channel, sourceIndex, sessionToken, reason ->
-            if (sessionToken == currentSessionToken) {
+            if (isForeground && sessionToken == currentSessionToken) {
                 val failedUrl = channel.streamSources.getOrNull(sourceIndex)?.url ?: ""
+                channel.streamSources.getOrNull(sourceIndex)?.let { failedSourceIds.add(it.sourceId) }
                 repository.recordSourceFailure(failedUrl, reason)
                 lastDiagRawErrorCode = "ExoPlayer 播放異常"
                 lastDiagAttemptResult = "嘗試失敗: $reason"
                 lastDiagVerificationTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                triggerNextFallback(channel, currentAttemptId, reason)
+                triggerNextFallback(currentPlayingChannel ?: channel, currentAttemptId, reason)
             }
         }
 
@@ -248,8 +326,9 @@ class MainActivity : AppCompatActivity() {
 
         channelAdapter = ChannelAdapter(
             getChannelHealth = { channel -> repository.getChannelHealth(channel) },
-            onChannelClick = { channel, position ->
-                playChannel(position)
+            onChannelClick = { channel, _ ->
+                val index = currentChannelList.indexOfFirst { it.id == channel.id }
+                if (index >= 0) playChannel(index)
                 hideDrawer()
             }
         )
@@ -324,13 +403,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 線路選擇面板適配器與事件
-        sourceAdapter = SourceAdapter { source, position ->
+        sourceAdapter = SourceAdapter(repository::getSourceFailure) { source, position ->
             currentPlayingChannel?.let { ch ->
                 repository.saveUserSelectedSource(ch.id, source.sourceId)
                 repository.saveUserSelectedSource(ch.canonicalId, source.sourceId)
                 hideSourceSelectionPanel()
                 Toast.makeText(this@MainActivity, "已選取線路：${source.label ?: "線路 ${position + 1}"}", Toast.LENGTH_SHORT).show()
-                playChannelStream(ch, position, isAutoFallback = false)
+                val selectedIndex = ch.streamSources.indexOfFirst { it.sourceId == source.sourceId && it.url == source.url }
+                if (selectedIndex >= 0) playChannelStream(ch, selectedIndex, isAutoFallback = false)
+                else Toast.makeText(this, "線路清單已更新，請重新選擇", Toast.LENGTH_SHORT).show()
             }
         }
         binding.rvStreamSources.apply {
@@ -384,8 +465,10 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
-                bufferingWatchdogJob?.cancel()
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!webAdPlaying && confirmedWebAttemptId != attemptId && bufferingWatchdogJob?.isActive != true) {
+                    startBufferingWatchdog(currentPlayingChannel, attemptId)
+                }
                 binding.layoutLoading.isVisible = false
                 binding.layoutYoutubeError.isVisible = false
             }
@@ -398,8 +481,19 @@ class MainActivity : AppCompatActivity() {
                 currentTimeSeconds: Double,
                 isLiveConfirmed: Boolean
             ) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 val channel = currentPlayingChannel ?: return
+                if (!isLiveConfirmed) {
+                    lastDiagAttemptResult = "網頁媒體播放中／直播狀態未確認"
+                    return
+                }
+                failedSourceIds.remove(sourceId)
+                lastWebProgressAt = android.os.SystemClock.elapsedRealtime()
+                if (confirmedWebAttemptId == attemptId) {
+                    repository.updateChannelHealth(channel.id, ChannelHealthStatus.NORMAL, "正常", channel.currentSourceIndex, channel.streamSources.size)
+                    return
+                }
+                adWatchdogJob?.cancel()
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
                 confirmedWebAttemptId = attemptId
@@ -445,7 +539,7 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 val channel = currentPlayingChannel ?: return
                 confirmedWebAttemptId = -1L
                 ytStablePlaybackJob?.cancel()
@@ -466,13 +560,25 @@ class MainActivity : AppCompatActivity() {
                 )
             }
 
+            override fun onPaused(attemptId: Long, channelId: String, sourceId: String, playMode: YouTubeIframePlayerView.PlayMode) {
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                confirmedWebAttemptId = -1L
+                bufferingWatchdogJob?.cancel()
+                webWatchWatchdogJob?.cancel()
+                ytStablePlaybackJob?.cancel()
+                binding.layoutLoading.isVisible = false
+                currentPlayingChannel?.let { channel ->
+                    repository.updateChannelHealth(channel.id, ChannelHealthStatus.UNKNOWN, "播放已暫停", channel.currentSourceIndex, channel.streamSources.size)
+                }
+            }
+
             override fun onEnded(
                 attemptId: Long,
                 channelId: String,
                 sourceId: String,
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 val channel = currentPlayingChannel ?: return
                 ytStablePlaybackJob?.cancel()
                 webWatchWatchdogJob?.cancel()
@@ -487,12 +593,13 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onAdStateChanged(attemptId: Long, channelId: String, sourceId: String, isAdPlaying: Boolean) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 if (webAdAttemptId == attemptId && webAdPlaying == isAdPlaying) return
                 webAdAttemptId = attemptId
                 webAdPlaying = isAdPlaying
                 val channel = currentPlayingChannel ?: return
                 if (isAdPlaying) {
+                    startAdWatchdog(channel, attemptId)
                     confirmedWebAttemptId = -1L
                     // 廣告播放中：暫停緩衝看門狗，避免廣告期間被誤判逾時換線
                     bufferingWatchdogJob?.cancel()
@@ -505,14 +612,17 @@ class MainActivity : AppCompatActivity() {
                         channel.currentSourceIndex,
                         channel.streamSources.size
                     )
-                } else if (confirmedWebAttemptId != attemptId) {
-                    // 廣告結束切入正片：重啟監聽
-                    startWebWatchWatchdog(channel, sourceId, attemptId)
+                } else {
+                    adWatchdogJob?.cancel()
+                    if (confirmedWebAttemptId != attemptId) {
+                        // 廣告結束切入正片：重啟監聽
+                        startWebWatchWatchdog(channel, sourceId, attemptId)
+                    }
                 }
             }
 
             override fun onLoginRequired(attemptId: Long, channelId: String, sourceId: String) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 val channel = currentPlayingChannel ?: return
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
@@ -526,7 +636,7 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 rawReason: String
             ) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 bufferingWatchdogJob?.cancel()
                 ytStablePlaybackJob?.cancel()
                 webWatchWatchdogJob?.cancel()
@@ -538,6 +648,7 @@ class MainActivity : AppCompatActivity() {
                 lastDiagRawErrorCode = "Geo-blocking (地區限制)"
                 lastDiagAttemptResult = "此 YouTube 影片在目前地區不可播放"
                 lastDiagVerificationTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                channel.currentSource?.let { failedSourceIds.add(it.sourceId) }
                 repository.recordSourceFailure(failedUrl, rawReason)
 
                 // 清楚標明為地區限制，手動模式維持原線路等待使用者決定，絕不自動亂跳
@@ -553,7 +664,7 @@ class MainActivity : AppCompatActivity() {
                 rawReason: String,
                 description: String
             ) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 bufferingWatchdogJob?.cancel()
                 ytStablePlaybackJob?.cancel()
                 webWatchWatchdogJob?.cancel()
@@ -565,6 +676,7 @@ class MainActivity : AppCompatActivity() {
                 lastDiagRawErrorCode = "$errorCode ($rawReason)"
                 lastDiagAttemptResult = "嘗試失敗: $description"
                 lastDiagVerificationTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                channel.currentSource?.let { failedSourceIds.add(it.sourceId) }
                 repository.recordSourceFailure(failedUrl, description)
 
                 if (errorCode in setOf(2, 100) && refreshExpiredYouTubeId(channel)) return
@@ -607,7 +719,7 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
-                if (attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
                 binding.layoutLoading.isVisible = false
@@ -666,24 +778,36 @@ class MainActivity : AppCompatActivity() {
      * 初始化設定面板控制項與按鈕監聽
      */
     private fun initSettingsPanel() {
-        binding.btnFavoriteChannel.setOnClickListener {
+        val accentNames = resources.getStringArray(R.array.accent_colors)
+        settings.btnAccentColor.text = getString(R.string.accent_selected, accentNames[repository.getSavedAccentColor().ordinal])
+        settings.btnAccentColor.setOnClickListener {
+            val current = repository.getSavedAccentColor()
+            AlertDialog.Builder(this).setTitle(R.string.accent_setting)
+                .setSingleChoiceItems(accentNames, current.ordinal) { dialog, index ->
+                    dialog.dismiss()
+                    val selected = ChannelRepository.AccentColor.entries[index]
+                    if (selected != current) {
+                        repository.saveAccentColor(selected)
+                        recreate()
+                    }
+                }.setNegativeButton(android.R.string.cancel, null).show()
+        }
+        settings.btnFavoriteChannel.setOnClickListener {
             currentPlayingChannel?.let { repository.toggleFavorite(it) }
             updateFavoriteButton()
         }
-        binding.btnFavoriteList.setOnClickListener { showSavedChannels(false) }
-        binding.btnRecentChannels.setOnClickListener { showSavedChannels(true) }
-        binding.btnRefreshLiveId.setOnClickListener {
+        settings.btnRefreshLiveId.setOnClickListener {
             val channel = currentPlayingChannel ?: return@setOnClickListener
             val handle = channel.currentSource?.liveChannelHandle
             if (handle.isNullOrBlank()) {
                 Toast.makeText(this, R.string.no_live_handle, Toast.LENGTH_SHORT).show()
             } else {
-                repository.invalidateYouTubeResolution(handle)
+                repository.invalidateYouTubeResolution(handle, channel.canonicalId)
                 playChannelStream(channel, channel.currentSourceIndex, false)
                 hideSettingsPanel()
             }
         }
-        binding.btnHiddenChannels.setOnClickListener {
+        settings.btnHiddenChannels.setOnClickListener {
             val hidden = repository.getHiddenChannels().sortedBy { it.name }
             if (hidden.isEmpty()) {
                 Toast.makeText(this, R.string.no_hidden_channels, Toast.LENGTH_SHORT).show()
@@ -700,7 +824,7 @@ class MainActivity : AppCompatActivity() {
                     }.setNegativeButton(android.R.string.cancel, null).show()
             }
         }
-        binding.btnHideChannel.setOnClickListener {
+        settings.btnHideChannel.setOnClickListener {
             val channel = currentPlayingChannel ?: return@setOnClickListener
             AlertDialog.Builder(this).setTitle(R.string.hide_current_channel)
                 .setMessage(getString(R.string.hide_channel_confirmation, channel.name))
@@ -719,22 +843,22 @@ class MainActivity : AppCompatActivity() {
                     repository.channels.value.firstOrNull()?.let { playChannelStream(it, it.currentSourceIndex, false) }
                 }.setNegativeButton(android.R.string.cancel, null).show()
         }
-        binding.btnCloseSettings.setOnClickListener {
+        settings.btnCloseSettings.setOnClickListener {
             hideSettingsPanel()
         }
 
         // 主題外觀切換
-        binding.btnThemeSystem.setOnClickListener { updateTheme(AppConfig.THEME_SYSTEM) }
-        binding.btnThemeDark.setOnClickListener { updateTheme(AppConfig.THEME_DARK) }
-        binding.btnThemeLight.setOnClickListener { updateTheme(AppConfig.THEME_LIGHT) }
+        settings.btnThemeSystem.setOnClickListener { updateTheme(AppConfig.THEME_SYSTEM) }
+        settings.btnThemeDark.setOnClickListener { updateTheme(AppConfig.THEME_DARK) }
+        settings.btnThemeLight.setOnClickListener { updateTheme(AppConfig.THEME_LIGHT) }
 
         // 畫質上限切換
-        binding.btnQualityAuto.setOnClickListener { updateQualityPref(AppConfig.QUALITY_AUTO) }
-        binding.btnQuality1080p.setOnClickListener { updateQualityPref(AppConfig.QUALITY_1080P) }
-        binding.btnQuality4k.setOnClickListener { updateQualityPref(AppConfig.QUALITY_4K) }
+        settings.btnQualityAuto.setOnClickListener { updateQualityPref(AppConfig.QUALITY_AUTO) }
+        settings.btnQuality1080p.setOnClickListener { updateQualityPref(AppConfig.QUALITY_1080P) }
+        settings.btnQuality4k.setOnClickListener { updateQualityPref(AppConfig.QUALITY_4K) }
 
         // 頻道來源手動更新
-        binding.btnRefreshChannels.setOnClickListener {
+        settings.btnRefreshChannels.setOnClickListener {
             Toast.makeText(this, "正在連線更新頻道來源清單…", Toast.LENGTH_SHORT).show()
             lifecycleScope.launch {
                 val isSuccess = repository.fetchAndRefreshFromRemote()
@@ -746,7 +870,7 @@ class MainActivity : AppCompatActivity() {
 
         // 自動備援切換按鈕 (手動主導 vs 自動備援)
         updateAutoFallbackButtonState()
-        binding.btnToggleAutoFallback.setOnClickListener {
+        settings.btnToggleAutoFallback.setOnClickListener {
             val nextState = !repository.isAutoFallbackEnabled()
             repository.setAutoFallbackEnabled(nextState)
             updateAutoFallbackButtonState()
@@ -755,15 +879,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 清除網頁快取與登入資料
-        binding.btnClearWebData.setOnClickListener {
+        settings.btnClearWebData.setOnClickListener {
             binding.youtubePlayerView.clearSiteData()
             Toast.makeText(this@MainActivity, "已清除本站網頁快取與登入資料", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun updateAutoFallbackButtonState() {
+        if (settingsBinding == null) return
         val isAuto = repository.isAutoFallbackEnabled()
-        binding.btnToggleAutoFallback.text = if (isAuto) {
+        settings.btnToggleAutoFallback.text = if (isAuto) {
             "自動備援切換：已啟用 (故障時自動換線)"
         } else {
             "自動備援切換：已關閉 (手動主導)"
@@ -783,6 +908,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsPanel() {
+        if (settingsBinding == null) {
+            settingsBinding = PanelSettingsBinding.bind(binding.settingsStub.inflate())
+            initSettingsPanel()
+            applyResponsiveLayout(binding.root.width)
+        }
         currentControlMode = TvControlMode.PANEL_OPEN
         binding.youtubePlayerView.setFocusIsolationEnabled(true)
         hideDrawer()
@@ -792,21 +922,24 @@ class MainActivity : AppCompatActivity() {
         refreshSettingsSourceInfo()
         refreshPlaybackDiagnostics()
         updateAutoFallbackButtonState()
-        binding.layoutSettings.isVisible = true
-        binding.btnThemeSystem.requestFocus()
+        settings.root.isVisible = true
+        currentControlMode = TvControlMode.PANEL_OPEN
+        binding.youtubePlayerView.setFocusIsolationEnabled(true)
+        settings.btnThemeSystem.requestFocus()
     }
 
     private fun hideSettingsPanel() {
-        binding.layoutSettings.isVisible = false
+        settingsBinding?.root?.isVisible = false
         updateControlModeAndFocusIsolationAfterPanelClose()
     }
 
     private fun refreshSettingsSourceInfo() {
-        binding.tvSourceLastUpdated.text = String.format(getString(R.string.source_last_updated), repository.getLastUpdateTime())
-        binding.tvSourceStatusDesc.text = repository.getSourceStatus()
+        if (settingsBinding == null) return
+        settings.tvSourceLastUpdated.text = getString(R.string.source_last_updated, repository.getLastUpdateTime())
+        settings.tvSourceStatusDesc.text = repository.getSourceStatus()
         val count = repository.getChannelsCount()
         val totalSources = repository.getTotalSourcesCount()
-        binding.tvSourceChannelCount.text = "有效頻道：共 $count 台 ($totalSources 條線路)"
+        settings.tvSourceChannelCount.text = getString(R.string.source_counts, count, totalSources)
         refreshPlaybackDiagnostics()
     }
 
@@ -814,19 +947,20 @@ class MainActivity : AppCompatActivity() {
      * 更新設定面板中的即時播放診斷資訊 (網址已脫敏，防止 Cookie / Token 洩漏)
      */
     private fun refreshPlaybackDiagnostics() {
+        if (settingsBinding == null) return
         updateFavoriteButton()
-        val versionHeader = "版本：v${AppConfig.VERSION_NAME} (Build ${AppConfig.VERSION_CODE} · ${AppConfig.BUILD_ID})"
+        val versionHeader = getString(R.string.diag_version, AppConfig.VERSION_NAME, AppConfig.VERSION_CODE, AppConfig.BUILD_ID)
         val ch = currentPlayingChannel
         if (ch == null) {
-            binding.tvDiagChannel.text = "$versionHeader\n頻道：無"
-            binding.tvDiagSource.text = "線路：無"
-            binding.tvDiagMode.text = "模式：無"
-            binding.tvDiagQualityStrategy.text = "4K策略：自動"
-            binding.tvDiagResult.text = "本輪嘗試：尚未起播"
+            settings.tvDiagChannel.text = getString(R.string.diag_no_channel, versionHeader)
+            settings.tvDiagSource.text = "線路：無"
+            settings.tvDiagMode.text = "模式：無"
+            settings.tvDiagQualityStrategy.text = getString(R.string.diag_quality_auto)
+            settings.tvDiagResult.text = "本輪嘗試：尚未起播"
             return
         }
 
-        binding.tvDiagChannel.text = "$versionHeader\n頻道：CH %02d %s".format(ch.number, ch.name)
+        settings.tvDiagChannel.text = getString(R.string.diag_channel, versionHeader, ch.number, ch.name)
 
         val src = ch.currentSource
         if (src != null) {
@@ -834,14 +968,14 @@ class MainActivity : AppCompatActivity() {
             val srcIdx = ch.currentSourceIndex + 1
             val total = ch.streamSources.size
             val label = src.label ?: "預設線路"
-            binding.tvDiagSource.text = "線路：$label ($srcIdx/$total)\n位址：$sanitized"
+            settings.tvDiagSource.text = getString(R.string.diag_source, label, srcIdx, total, sanitized)
             if (src.type == StreamType.YOUTUBE) {
-                val resolution = src.liveChannelHandle?.let { repository.getYouTubeResolution(it) }
+                val resolution = src.liveChannelHandle?.let { repository.getYouTubeResolution(it, ch.canonicalId) }
                 val resolvedTime = resolution?.second?.let { SimpleDateFormat("MM/dd HH:mm:ss", Locale.getDefault()).format(Date(it)) } ?: "尚無"
-                binding.tvDiagSource.append("\n本次影片 ID：${activeYouTubeVideoId ?: "官方直播入口"}\n解析時間：$resolvedTime")
+                settings.tvDiagSource.append(getString(R.string.diag_youtube_resolution, activeYouTubeVideoId ?: "官方直播入口", resolvedTime))
             }
         } else {
-            binding.tvDiagSource.text = "線路：無可用線路"
+            settings.tvDiagSource.text = "線路：無可用線路"
         }
 
         val modeDesc = when (src?.type) {
@@ -849,27 +983,51 @@ class MainActivity : AppCompatActivity() {
             StreamType.WEB_VIEW -> "模式：官方網頁觀看 (WebView 自適應，獨立於 Media3)"
             else -> "模式：Media3 原生硬解 (支援畫質上限限制)"
         }
-        binding.tvDiagMode.text = modeDesc
+        settings.tvDiagMode.text = modeDesc
 
         val qualityStrategyText = if (src?.type == StreamType.YOUTUBE || src?.type == StreamType.WEB_VIEW) {
             "4K策略：網頁自適應 (由官方伺服器調配)"
         } else {
-            "4K策略：${playerManager.qualityDowngradeReason.value}"
+            getString(R.string.diag_quality, playerManager.qualityDowngradeReason.value)
         }
-        binding.tvDiagQualityStrategy.text = qualityStrategyText
+        settings.tvDiagQualityStrategy.text = qualityStrategyText
 
-        binding.tvDiagResult.text = "結果：$lastDiagAttemptResult\n錯誤碼：$lastDiagRawErrorCode\n最後驗證：$lastDiagVerificationTime | 成功：$lastDiagSuccessTime"
+        settings.tvDiagResult.text = getString(R.string.diag_result, lastDiagAttemptResult, lastDiagRawErrorCode, lastDiagVerificationTime, lastDiagSuccessTime)
         currentPlayingChannel?.currentSource?.url?.let { url ->
             repository.getSourceLastFailure(url)?.let { reason ->
-                binding.tvDiagResult.append("\n此線路最近失敗：$reason")
+                settings.tvDiagResult.append(getString(R.string.diag_last_failure, reason))
             }
         }
     }
 
     private fun startHealthExpiryScanner() {
         healthExpiryScanJob = lifecycleScope.launch {
+            var sampledAttempt = -1L
+            var lastPosition: Long? = null
             while (true) {
-                delay(AppConfig.HEALTH_EXPIRY_SCAN_INTERVAL_MS)
+                delay(5000)
+                if (!isForeground) { lastPosition = null; continue }
+                val channel = currentPlayingChannel
+                if (sampledAttempt != currentAttemptId) {
+                    sampledAttempt = currentAttemptId
+                    lastPosition = null
+                }
+                if (channel?.currentSource?.type == StreamType.HLS) {
+                    val position = playerManager.playbackPosition()
+                    if (position != null && lastPosition != null && position > lastPosition!!) {
+                        repository.updateChannelHealth(channel.id, ChannelHealthStatus.NORMAL, "正常", channel.currentSourceIndex, channel.streamSources.size)
+                    } else if (lastPosition != null && position == lastPosition) {
+                        repository.updateChannelHealth(channel.id, ChannelHealthStatus.CONNECTING, "播放進度停滯", channel.currentSourceIndex, channel.streamSources.size)
+                    } else if (position == null && repository.getChannelHealth(channel).status == ChannelHealthStatus.NORMAL) {
+                        repository.updateChannelHealth(channel.id, ChannelHealthStatus.UNKNOWN, "播放進度待確認", channel.currentSourceIndex, channel.streamSources.size)
+                    }
+                    lastPosition = position
+                } else if (channel != null && confirmedWebAttemptId == currentAttemptId &&
+                    android.os.SystemClock.elapsedRealtime() - lastWebProgressAt > 45000L) {
+                    confirmedWebAttemptId = -1L
+                    repository.updateChannelHealth(channel.id, ChannelHealthStatus.UNKNOWN, "播放進度待確認", channel.currentSourceIndex, channel.streamSources.size)
+                    startBufferingWatchdog(channel, currentAttemptId)
+                }
                 repository.scanExpiredHealthStatuses()
             }
         }
@@ -883,14 +1041,14 @@ class MainActivity : AppCompatActivity() {
                     currentChannelList = emptyList()
                     currentChannelIndex = 0
                     channelAdapter.submitList(emptyList())
-                    binding.tvDrawerChannelCount.text = "共 0 台 (0 條線路)"
+                    binding.tvDrawerChannelCount.text = getString(R.string.drawer_counts, 0, 0)
                     return@collect
                 }
                 if (channels.isNotEmpty()) {
                     currentChannelList = channels
                     channelAdapter.submitList(channels)
                     val totalSources = channels.sumOf { it.streamSources.size }
-                    binding.tvDrawerChannelCount.text = "共 ${channels.size} 台 ($totalSources 條線路)"
+                    binding.tvDrawerChannelCount.text = getString(R.string.drawer_counts, channels.size, totalSources)
 
                     val playing = currentPlayingChannel
                     if (playing != null) {
@@ -901,17 +1059,20 @@ class MainActivity : AppCompatActivity() {
                         }
                         if (matchIndex != -1) {
                             val matchedChannel = channels[matchIndex]
-                            val currentUrl = playing.currentSource?.url
-                            val newSourceIndex = if (currentUrl != null) {
-                                matchedChannel.streamSources.indexOfFirst { it.url == currentUrl }.let {
-                                    if (it != -1) it else matchedChannel.currentSourceIndex.coerceIn(0, (matchedChannel.streamSources.size - 1).coerceAtLeast(0))
+                            // 播放工作階段保留實際來源；目錄刷新不能替換底層播放器身分。
+                            val activeSource = playing.currentSource
+                            if (activeSource != null) {
+                                val sourceIndex = matchedChannel.streamSources.indexOfFirst {
+                                    it.sourceId == activeSource.sourceId && it.url == activeSource.url
                                 }
-                            } else {
-                                matchedChannel.currentSourceIndex
+                                val sources = if (sourceIndex >= 0) matchedChannel.streamSources
+                                    else matchedChannel.streamSources + activeSource
+                                currentPlayingChannel = matchedChannel.copy(
+                                    id = playing.id, streamSources = sources,
+                                    currentSourceIndex = if (sourceIndex >= 0) sourceIndex else sources.lastIndex
+                                )
                             }
-                            val updatedPlaying = matchedChannel.withSourceIndex(newSourceIndex)
                             currentChannelIndex = matchIndex
-                            currentPlayingChannel = updatedPlaying
                             channelAdapter.setPlayingIndex(matchIndex)
                         }
                     } else if (channelAdapter.getPlayingIndex() == -1) {
@@ -923,7 +1084,8 @@ class MainActivity : AppCompatActivity() {
                         currentChannelIndex = targetIndex
                         val targetChannel = channels[targetIndex]
                         channelAdapter.setPlayingIndex(targetIndex)
-                        playChannelStream(targetChannel, targetSourceIdx, isAutoFallback = false)
+                        val selected = repository.applyUserSelectedSources(listOf(targetChannel.withSourceIndex(targetSourceIdx))).first()
+                        playChannelStream(selected, selected.currentSourceIndex, isAutoFallback = false)
                     }
                 }
             }
@@ -931,10 +1093,12 @@ class MainActivity : AppCompatActivity() {
 
         // 2. 監聽各頻道健康狀態變更，僅局部刷新受影響項目
         lifecycleScope.launch {
+            var previous = emptyMap<String, com.aladdin.tv.data.model.ChannelHealth>()
             repository.healthMap.collect { healthMap ->
-                for ((channelId, _) in healthMap) {
-                    channelAdapter.notifyHealthChanged(channelId)
+                for (channelId in previous.keys + healthMap.keys) {
+                    if (previous[channelId] != healthMap[channelId]) channelAdapter.notifyHealthChanged(channelId)
                 }
+                previous = healthMap
             }
         }
 
@@ -951,6 +1115,7 @@ class MainActivity : AppCompatActivity() {
         // 4. 監聽 ExoPlayer 狀態
         lifecycleScope.launch {
             playerManager.playerState.collect { state ->
+                if (!isForeground) return@collect
                 val curType = currentPlayingChannel?.currentSource?.type
                 if (curType == StreamType.YOUTUBE || curType == StreamType.WEB_VIEW) return@collect
 
@@ -972,8 +1137,9 @@ class MainActivity : AppCompatActivity() {
                         lastDiagSuccessTime = nowStr
                         lastDiagVerificationTime = nowStr
                         lastDiagAttemptResult = "播放成功 (持續前進)"
-                        currentPlayingChannel?.currentSource?.url?.let {
-                            repository.recordSourceSuccess(it)
+                        currentPlayingChannel?.currentSource?.let { source ->
+                            failedSourceIds.remove(source.sourceId)
+                            repository.recordSourceSuccess(source.url)
                         }
                         currentPlayingChannel?.let { repository.rememberWatchedChannel(it) }
                     }
@@ -982,7 +1148,7 @@ class MainActivity : AppCompatActivity() {
                         binding.layoutError.isVisible = true
                         binding.tvErrorMsg.text = state.message
                         binding.tvErrorRetryCountdown.text =
-                            "正在進行自動重試 (${state.retryCount}/${state.maxRetries})…"
+                            getString(R.string.retry_progress, state.retryCount, state.maxRetries)
                     }
                 }
             }
@@ -1005,17 +1171,24 @@ class MainActivity : AppCompatActivity() {
         val channel = currentChannelList[validIndex]
         channelAdapter.setPlayingIndex(validIndex)
 
-        playChannelStream(channel, 0, isAutoFallback = false)
+        val selected = repository.applyUserSelectedSources(listOf(channel)).first()
+        playChannelStream(selected, selected.currentSourceIndex, isAutoFallback = false)
     }
 
     /**
      * 核心播放調度器：統一處理首次播放、重試與備援切換，嚴格隔離舊工作階段與雙重聲音
      */
     private fun playChannelStream(channel: Channel, sourceIndex: Int, isAutoFallback: Boolean, refreshingLiveId: Boolean = false) {
+        if (!isForeground) {
+            pendingPlayback = { playChannelStream(channel, sourceIndex, isAutoFallback, refreshingLiveId) }
+            return
+        }
+        pendingPlayback = null
         youtubeResolveJob?.cancel()
         activeYouTubeVideoId = null
         youtubeWebWatch = false
         confirmedWebAttemptId = -1L
+        lastWebProgressAt = 0L
         webAdAttemptId = -1L
         webAdPlaying = false
         if (!refreshingLiveId) youtubeRefreshAttempted = false
@@ -1029,6 +1202,7 @@ class MainActivity : AppCompatActivity() {
         webWatchWatchdogJob?.cancel()
 
         val activeChannel = channel.withSourceIndex(sourceIndex)
+        adWatchdogJob?.cancel()
         currentPlayingChannel = activeChannel
 
         // 切台重置：恢復 TV_APP 控制模式，隱藏所有錯誤浮層，鎖定電視盒根焦點
@@ -1053,6 +1227,7 @@ class MainActivity : AppCompatActivity() {
 
         if (!isAutoFallback) {
             triedSourceIds.clear()
+            failedSourceIds.clear()
         }
         triedSourceIds.add(currentSource.sourceId)
 
@@ -1104,8 +1279,8 @@ class MainActivity : AppCompatActivity() {
                 if (!handle.isNullOrBlank()) {
                     bufferingWatchdogJob?.cancel()
                     youtubeResolveJob = lifecycleScope.launch {
-                        val resolved = repository.resolveYouTubeLiveVideoId(handle)
-                        if (currentAttemptId == attemptId) {
+                        val resolved = repository.resolveYouTubeLiveVideoId(handle, activeChannel.canonicalId)
+                        if (isForeground && currentAttemptId == attemptId) {
                             activeYouTubeVideoId = resolved
                             startBufferingWatchdog(activeChannel, attemptId)
                             if (resolved != null) {
@@ -1152,6 +1327,7 @@ class MainActivity : AppCompatActivity() {
                 binding.playerView.isVisible = true
 
                 binding.tvOsdResolution.text = currentSource.label ?: "LIVE"
+                playerManager.setPlayWhenReady(isForeground)
                 playerManager.play(activeChannel, sessionToken)
                 binding.rootContainer.requestFocus()
             }
@@ -1161,7 +1337,7 @@ class MainActivity : AppCompatActivity() {
     private fun currentYouTubeWatchTarget(): String {
         activeYouTubeVideoId?.let { return "https://www.youtube.com/watch?v=$it" }
         val source = currentPlayingChannel?.currentSource ?: return ""
-        source.liveChannelHandle?.takeIf { it.startsWith("@") }?.let {
+        source.liveChannelHandle?.takeIf { it.startsWith("@") && !it.equals("@DaAiVideo", ignoreCase = true) }?.let {
             return "https://www.youtube.com/@${java.net.URLEncoder.encode(it.substring(1), "UTF-8")}/live"
         }
         return source.url
@@ -1172,14 +1348,15 @@ class MainActivity : AppCompatActivity() {
         val handle = source.liveChannelHandle ?: return false
         if (source.type != StreamType.YOUTUBE || youtubeRefreshAttempted) return false
         youtubeRefreshAttempted = true
-        repository.invalidateYouTubeResolution(handle)
+        repository.invalidateYouTubeResolution(handle, channel.canonicalId)
         playChannelStream(channel, channel.currentSourceIndex, false, refreshingLiveId = true)
         return true
     }
 
     private fun updateFavoriteButton() {
+        if (settingsBinding == null) return
         val favorite = currentPlayingChannel?.let { repository.isFavorite(it) } == true
-        binding.btnFavoriteChannel.setText(if (favorite) R.string.remove_favorite else R.string.add_favorite)
+        settings.btnFavoriteChannel.setText(if (favorite) R.string.remove_favorite else R.string.add_favorite)
     }
 
     private fun showSavedChannels(recent: Boolean) {
@@ -1214,6 +1391,7 @@ class MainActivity : AppCompatActivity() {
                     playerManager.playerState.value == PlayerState.Playing) return@launch
                 val url = channel.currentSource?.url ?: ""
                 if (url.isNotBlank()) {
+                    channel.currentSource?.let { failedSourceIds.add(it.sourceId) }
                     repository.recordSourceFailure(url, "緩衝逾時")
                 }
                 val timeoutMsg = getString(R.string.youtube_error_timeout)
@@ -1226,6 +1404,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun startAdWatchdog(channel: Channel, attemptId: Long) {
+        adWatchdogJob?.cancel()
+        adWatchdogJob = lifecycleScope.launch {
+            delay(180_000L)
+            if (currentAttemptId == attemptId && webAdPlaying) {
+                showManualPlaybackError(channel, "官方廣告載入逾時，請重試或選擇其他線路")
+            }
+        }
+    }
+
     private fun startWebWatchWatchdog(channel: Channel, sourceId: String, attemptId: Long) {
         webWatchWatchdogJob?.cancel()
         webWatchWatchdogJob = lifecycleScope.launch {
@@ -1233,6 +1421,7 @@ class MainActivity : AppCompatActivity() {
             if (currentAttemptId == attemptId) {
                 val url = channel.currentSource?.url ?: ""
                 if (url.isNotBlank()) {
+                    channel.currentSource?.let { failedSourceIds.add(it.sourceId) }
                     repository.recordSourceFailure(url)
                 }
                 val timeoutMsg = getString(R.string.youtube_error_web_watch_failed)
@@ -1249,6 +1438,7 @@ class MainActivity : AppCompatActivity() {
      * 當前頻道手動模式播放受阻，不自行換線，呈現明確原因與「重試」「選其他線路」「返回列表」出口
      */
     private fun showManualPlaybackError(channel: Channel, reason: String, allowWebWatch: Boolean = false) {
+        adWatchdogJob?.cancel()
         bufferingWatchdogJob?.cancel()
         ytStablePlaybackJob?.cancel()
         webWatchWatchdogJob?.cancel()
@@ -1256,8 +1446,9 @@ class MainActivity : AppCompatActivity() {
 
         repository.updateChannelHealth(
             channel.id,
-            ChannelHealthStatus.FAILED,
-            reason,
+            if (channel.streamSources.isNotEmpty() && channel.streamSources.all { it.sourceId in failedSourceIds })
+                ChannelHealthStatus.FAILED else ChannelHealthStatus.UNKNOWN,
+            "目前線路：$reason",
             channel.currentSourceIndex,
             channel.streamSources.size
         )
@@ -1271,14 +1462,14 @@ class MainActivity : AppCompatActivity() {
         if (channel.streamType == StreamType.YOUTUBE || channel.currentSource?.type == StreamType.WEB_VIEW) {
             binding.layoutYoutubeError.isVisible = true
             binding.layoutError.isVisible = false
-            binding.tvYoutubeErrorMsg.text = "【$srcName】$reason"
+            binding.tvYoutubeErrorMsg.text = getString(R.string.source_playback_error, srcName, reason)
             binding.btnYoutubeRetry.text = getString(R.string.btn_retry)
             binding.btnYoutubeWebWatch.isVisible = allowWebWatch
             binding.btnYoutubeRetry.requestFocus()
         } else {
             binding.layoutError.isVisible = true
             binding.layoutYoutubeError.isVisible = false
-            binding.tvErrorMsg.text = "【$srcName】$reason"
+            binding.tvErrorMsg.text = getString(R.string.source_playback_error, srcName, reason)
             binding.tvErrorRetryCountdown.text = "請選擇「重試此線路」或「選擇其他線路」"
             binding.btnErrorRetry.requestFocus()
         }
@@ -1337,12 +1528,12 @@ class MainActivity : AppCompatActivity() {
 
         if (channel.streamType == StreamType.YOUTUBE) {
             binding.layoutYoutubeError.isVisible = true
-            binding.tvYoutubeErrorMsg.text = "播放失敗：$reason\n(${getString(R.string.status_all_sources_failed)})"
+            binding.tvYoutubeErrorMsg.text = getString(R.string.playback_exhausted, reason, getString(R.string.status_all_sources_failed))
             binding.btnYoutubeRetry.text = getString(R.string.btn_retry)
             binding.btnYoutubeRetry.requestFocus()
         } else {
             binding.layoutError.isVisible = true
-            binding.tvErrorMsg.text = "播放失敗：$reason"
+            binding.tvErrorMsg.text = getString(R.string.playback_failure, reason)
             binding.tvErrorRetryCountdown.text = getString(R.string.status_all_sources_failed)
         }
     }
@@ -1358,7 +1549,7 @@ class MainActivity : AppCompatActivity() {
     private fun showOsd(channel: Channel) {
         osdDismissJob?.cancel()
 
-        binding.tvOsdChannelNum.text = String.format("CH %02d", channel.number)
+        binding.tvOsdChannelNum.text = String.format(Locale.ROOT, getString(R.string.channel_format), channel.number)
         binding.tvOsdChannelName.text = channel.name
 
         val groupLabel = buildString {
@@ -1371,7 +1562,7 @@ class MainActivity : AppCompatActivity() {
         val src = channel.currentSource
         val srcLabel = src?.label ?: "LIVE"
         val lineInfo = if (channel.streamSources.size > 1) " (${channel.currentSourceIndex + 1}/${channel.streamSources.size})" else ""
-        binding.tvOsdResolution.text = "$srcLabel$lineInfo"
+        binding.tvOsdResolution.text = getString(R.string.osd_source, srcLabel, lineInfo)
 
         val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
         binding.tvOsdTime.text = timeFormat.format(Date())
@@ -1403,9 +1594,12 @@ class MainActivity : AppCompatActivity() {
 
         val total = channel.streamSources.size
         val lineCountStr = if (total <= 1) "僅 1 條線路" else "$total 條線路"
-        binding.tvSourceSelectionTitle.text = "${channel.name} · 線路清單 ($lineCountStr)"
+        binding.tvSourceSelectionTitle.text = getString(R.string.source_selection_title, channel.name, lineCountStr)
         sourceAdapter.submitSources(channel.streamSources, channel.currentSourceIndex)
         binding.layoutSourceSelection.isVisible = true
+        currentControlMode = TvControlMode.PANEL_OPEN
+        binding.youtubePlayerView.setFocusIsolationEnabled(true)
+        binding.rvStreamSources.scrollToPosition(channel.currentSourceIndex)
 
         binding.rvStreamSources.post {
             binding.rvStreamSources.findViewHolderForAdapterPosition(channel.currentSourceIndex)?.itemView?.requestFocus()
@@ -1443,7 +1637,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDrawer() {
-        if (binding.layoutSettings.isVisible || binding.layoutSourceSelection.isVisible) return
+        if ((settingsBinding?.root?.isVisible == true) || binding.layoutSourceSelection.isVisible) return
 
         drawerDismissJob?.cancel()
         currentControlMode = TvControlMode.PANEL_OPEN
@@ -1474,7 +1668,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateControlModeAndFocusIsolationAfterPanelClose() {
         val anyPanelVisible = binding.layoutDrawer.isVisible ||
                 binding.layoutSourceSelection.isVisible ||
-                binding.layoutSettings.isVisible ||
+                (settingsBinding?.root?.isVisible == true) ||
                 binding.layoutYoutubeError.isVisible ||
                 binding.layoutError.isVisible
 
@@ -1493,6 +1687,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetDrawerDismissTimer() {
         drawerDismissJob?.cancel()
+        if (packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN) ||
+            (getSystemService(ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager).isTouchExplorationEnabled) return
         drawerDismissJob = lifecycleScope.launch {
             delay(AppConfig.DRAWER_AUTO_DISMISS_MS)
             hideDrawer()
@@ -1527,7 +1723,7 @@ class MainActivity : AppCompatActivity() {
                 hideSourceSelectionPanel()
                 return true
             }
-            if (binding.layoutSettings.isVisible) {
+            if ((settingsBinding?.root?.isVisible == true)) {
                 hideSettingsPanel()
                 return true
             }
@@ -1550,9 +1746,12 @@ class MainActivity : AppCompatActivity() {
         // 只有這三個真正需要上下垂直捲動的面板，上下方向鍵才交給 RecyclerView / ScrollView 內部處理
         val isScrollPanelOpen = binding.layoutDrawer.isVisible ||
                 binding.layoutSourceSelection.isVisible ||
-                binding.layoutSettings.isVisible
+                (settingsBinding?.root?.isVisible == true)
 
-        if (isScrollPanelOpen) {
+        val isCompactErrorOpen =
+            (binding.layoutYoutubeError.isVisible && binding.layoutYoutubeErrorActions.orientation == android.widget.LinearLayout.VERTICAL) ||
+            (binding.layoutError.isVisible && binding.layoutNativeErrorActions.orientation == android.widget.LinearLayout.VERTICAL)
+        if (isScrollPanelOpen || isCompactErrorOpen) {
             currentControlMode = TvControlMode.PANEL_OPEN
             resetDrawerDismissTimer()
             // 長按清單導航 (repeatCount >= 0) 正常由 RecyclerView / ScrollView 內部處理
@@ -1645,7 +1844,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 2. 設定面板開啟 -> 關閉設定面板
-        if (binding.layoutSettings.isVisible) {
+        if ((settingsBinding?.root?.isVisible == true)) {
             hideSettingsPanel()
             return true
         }
@@ -1815,7 +2014,7 @@ class MainActivity : AppCompatActivity() {
     private fun initGestureDetector() {
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                if (binding.layoutSettings.isVisible) {
+                if ((settingsBinding?.root?.isVisible == true)) {
                     hideSettingsPanel()
                     return true
                 }
@@ -1833,7 +2032,7 @@ class MainActivity : AppCompatActivity() {
                 velocityX: Float,
                 velocityY: Float
             ): Boolean {
-                if (e1 == null || binding.layoutSettings.isVisible) return false
+                if (e1 == null || (settingsBinding?.root?.isVisible == true)) return false
                 val deltaX = e2.x - e1.x
                 val deltaY = e2.y - e1.y
 

@@ -19,7 +19,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:minWidth="52dp"
-        android:textColor="@color/tv_accent"
+        android:textColor="?attr/tvAccent"
         android:textSize="18sp"
         android:textStyle="bold" />
 
@@ -93,8 +93,8 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
-        android:text="● 播放中"
-        android:textColor="@color/tv_accent"
+        android:text="@string/channel_playing"
+        android:textColor="?attr/tvTextHighlight"
         android:textSize="12sp"
         android:textStyle="bold"
         android:visibility="gone" />
