@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">阿拉丁TV</string>
+    <string name="app_slogan">如你所願</string>
+    <string name="app_full_slogan">阿拉丁TV，如你所願</string>
     <string name="buffering">緩衝載入中…</string>
     <string name="playback_error">播放異常，正在自動重試…</string>
     <string name="press_again_to_exit">再按一次退出阿拉丁TV</string>
@@ -109,4 +111,22 @@
         <item>紫色</item>
     </string-array>
     <string name="splash_description">阿拉丁神燈啟動動畫，點擊或按確認鍵略過</string>
+    <string name="privacy_policy">隱私政策</string>
+    <string name="privacy_policy_url" translatable="false">https://zzshcool.github.io/aladdintvproject/privacy-policy.html</string>
+    <string name="privacy_browser_unavailable">此裝置沒有可開啟網頁的瀏覽器，請使用其他裝置瀏覽：%1$s</string>
+    <string name="language_setting">介面語言</string>
+    <string name="language_selected">語言：%1$s</string>
+    <string name="language_system">跟隨系統</string>
+    <string name="language_zh_tw">繁體中文</string>
+    <string name="language_en">English</string>
+    <string name="language_applied">語言設定已套用</string>
+    <string name="auto_fallback_on">自動備援切換：已啟用 (故障時自動換線)</string>
+    <string name="theme_applied">主題外觀已套用</string>
+    <string name="quality_applied">畫質偏好上限已套用</string>
+    <string name="refreshing_channels">正在連線更新頻道來源清單…</string>
+    <string name="web_data_cleared">已清除本站網頁快取與登入資料</string>
+    <string name="splash_animation_on">開機動畫：已開啟 (神燈動畫)</string>
+    <string name="splash_animation_off">開機動畫：已關閉 (直接LOGO畫面)</string>
+    <string name="splash_animation_toast_on">已開啟開機動畫 (神燈動畫)</string>
+    <string name="splash_animation_toast_off">已關閉開機動畫 (直接LOGO畫面)</string>
 </resources>

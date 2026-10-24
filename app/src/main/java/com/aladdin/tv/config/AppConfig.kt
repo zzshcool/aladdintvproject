@@ -58,6 +58,13 @@ object AppConfig {
     const val PREF_TOTAL_SOURCES_COUNT = "total_sources_count"
     const val PREF_AUTO_FALLBACK_ENABLED = "auto_fallback_enabled"
     const val PREF_USER_SELECTED_SOURCE_PREFIX = "user_selected_source_"
+    const val PREF_APP_LANGUAGE = "app_language"
+    const val PREF_SPLASH_ANIMATION_ENABLED = "splash_animation_enabled"
+
+    // 介面語言定義：跟隨系統 (system)、繁體中文 (zh-TW)、英文 (en)
+    const val LANGUAGE_SYSTEM = "system"
+    const val LANGUAGE_ZH_TW = "zh-TW"
+    const val LANGUAGE_EN = "en"
 
     // 主題模式定義：跟隨系統 (0)、深色 (1)、淺色 (2)
     const val THEME_SYSTEM = 0

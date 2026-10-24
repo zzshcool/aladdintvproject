@@ -1,0 +1,132 @@
+<resources>
+    <string name="app_name">Aladdin TV</string>
+    <string name="app_slogan">Live Streams as You Wish.</string>
+    <string name="app_full_slogan">Aladdin TV: Live Streams as You Wish.</string>
+    <string name="buffering">Buffering…</string>
+    <string name="playback_error">Playback error. Retrying automatically…</string>
+    <string name="press_again_to_exit">Press back again to exit Aladdin TV</string>
+    <string name="channel_format">CH %02d</string>
+
+    <!-- Settings strings -->
+    <string name="settings">Settings</string>
+    <string name="settings_title">System Settings</string>
+    <string name="theme_setting">Theme Mode</string>
+    <string name="theme_system">Follow System</string>
+    <string name="theme_dark">Dark Mode</string>
+    <string name="theme_light">Light Mode</string>
+    <string name="refresh_channels">Refresh Channel List</string>
+    <string name="close_settings">Close Settings</string>
+
+    <!-- Status indicator strings -->
+    <string name="status_normal">Normal</string>
+    <string name="status_connecting">Connecting</string>
+    <string name="status_failed">Failed</string>
+    <string name="status_unknown">Unchecked</string>
+    <string name="status_external">External Player</string>
+    <string name="status_switching_backup">Switching Backup (%1$d/%2$d)</string>
+
+    <!-- Quality preference strings -->
+    <string name="quality_setting">Max Resolution Preference</string>
+    <string name="quality_auto">Auto (Preferred)</string>
+    <string name="quality_1080p">Up to 1080p</string>
+    <string name="quality_4k">Allow 4K</string>
+    <string name="quality_note">Note: Sets the maximum allowed resolution. Actual quality depends on the stream source and bandwidth; YouTube adjusts quality automatically.</string>
+
+    <!-- Source status strings -->
+    <string name="source_status_title">Channel Source Info</string>
+    <string name="source_status_success">Channel list updated successfully</string>
+    <string name="source_status_fallback">Remote download failed; using cache</string>
+    <string name="source_last_updated">Last Updated: %s</string>
+
+    <!-- YouTube embedded playback and error strings -->
+    <string name="youtube_error_embedded_disabled">Broadcaster disabled embedding for this stream (Error 150)</string>
+    <string name="youtube_error_timeout">YouTube player timed out</string>
+    <string name="youtube_error_web_watch_failed">Official web watch mode cannot load on this device</string>
+    <string name="youtube_autoplay_blocked">Autoplay blocked. Press OK or tap the screen to play</string>
+    <string name="youtube_switching_web_watch">Embedding disabled (150). Switching to official web watch…</string>
+    <string name="youtube_status_web_watch">Official Web Watch</string>
+    <string name="btn_retry">Retry Connection</string>
+    <string name="btn_play_manual">Press OK to Play</string>
+    <string name="status_all_sources_failed">All backup sources exhausted</string>
+    <string name="touch_channels">Channels</string>
+    <string name="touch_sources">Routes</string>
+    <string name="touch_settings">Settings</string>
+    <string name="touch_exit">Exit</string>
+    <string name="touch_web">Web Mode</string>
+    <string name="favorite_channels">Favorites</string>
+    <string name="recent_channels">Recent History</string>
+    <string name="add_favorite">Favorite Current Channel</string>
+    <string name="remove_favorite">Unfavorite Current Channel</string>
+    <string name="no_favorite_channels">No favorite channels yet</string>
+    <string name="no_recent_channels">No playback history yet</string>
+    <string name="restore_hidden_channel">Hidden Channels / Restore &amp; Test</string>
+    <string name="no_hidden_channels">No hidden channels currently</string>
+    <string name="hide_current_channel">Hide Current Channel</string>
+    <string name="hide_channel_confirmation">Hide "%1$s"? You can restore it later from Hidden Channels.</string>
+    <string name="refresh_live_id">Re-resolve Current Live Stream</string>
+    <string name="no_live_handle">Current route is not a dynamic YouTube live entrance</string>
+    <string name="live_resolution_unconfirmed">Live ID unconfirmed; using official live stream entrance</string>
+    <string name="invalid_youtube_id">Invalid video ID. Please switch to official web watch</string>
+    <string name="touch_menu">Playback Menu</string>
+    <string name="touch_fill">Fill</string>
+    <string name="touch_fit">Fit</string>
+    <string name="touch_menu_glyph">☰</string>
+    <string name="select_other_source">Select Other Source</string>
+    <string name="watch_official_page">Watch on Official Web Page</string>
+    <string name="return_channel_list">Return to Channel List</string>
+    <string name="live_label">LIVE</string>
+    <string name="number_jump_label">Jump: </string>
+    <string name="diagnostics_title">Real-Time Playback Diagnostics</string>
+    <string name="fallback_settings_title">Backup Strategy &amp; Data Management</string>
+    <string name="auto_fallback_off">Auto Fallback: OFF (Manual Priority)</string>
+    <string name="auto_fallback_on">Auto Fallback: ON (Auto Switch on Failure)</string>
+    <string name="clear_web_data">Clear Web Cache &amp; Login Data</string>
+    <string name="web_interaction_hint">Web Interaction Mode · Press [MENU] or [BACK] anytime to return to TV controls</string>
+    <string name="source_selection_hint">Move focus to preview, press [OK] to switch route, press [BACK] to cancel</string>
+    <string name="close_source_panel">Close Panel (Keep Current Route)</string>
+    <string name="channel_playing">● Playing</string>
+    <string name="source_playing">Current Route</string>
+    <string name="source_counts">Valid Channels: %1$d total (%2$d routes)</string>
+    <string name="drawer_counts">%1$d channels (%2$d routes)</string>
+    <string name="diag_version">Version: v%1$s (Build %2$d · %3$s)</string>
+    <string name="diag_no_channel">%1$s\nChannel: None</string>
+    <string name="diag_quality_auto">4K Policy: Auto</string>
+    <string name="diag_channel">%1$s\nChannel: CH %2$02d %3$s</string>
+    <string name="diag_source">Route: %1$s (%2$d/%3$d)\nURL: %4$s</string>
+    <string name="diag_youtube_resolution">\nVideo ID: %1$s\nResolved At: %2$s</string>
+    <string name="diag_quality">4K Policy: %1$s</string>
+    <string name="diag_result">Result: %1$s\nError Code: %2$s\nLast Verified: %3$s | Success: %4$s</string>
+    <string name="diag_last_failure">\nRecent Failure on Route: %1$s</string>
+    <string name="retry_progress">Auto-retrying (%1$d/%2$d)…</string>
+    <string name="source_playback_error">[%1$s] %2$s</string>
+    <string name="playback_exhausted">Playback failed: %1$s\n(%2$s)</string>
+    <string name="playback_failure">Playback failed: %1$s</string>
+    <string name="osd_source">%1$s%2$s</string>
+    <string name="source_selection_title">%1$s · Route List (%2$s)</string>
+    <string name="accent_setting">Theme Color</string>
+    <string name="accent_selected">Theme Color: %1$s</string>
+    <string-array name="accent_colors">
+        <item>Gold</item>
+        <item>Blue</item>
+        <item>Green</item>
+        <item>Purple</item>
+    </string-array>
+    <string name="splash_description">Aladdin lamp splash animation. Tap or press Enter to skip.</string>
+    <string name="privacy_policy">Privacy Policy</string>
+    <string name="privacy_policy_url" translatable="false">https://zzshcool.github.io/aladdintvproject/privacy-policy.html#en</string>
+    <string name="privacy_browser_unavailable">No web browser found on this device. Please visit on another device: %1$s</string>
+    <string name="language_setting">Language</string>
+    <string name="language_selected">Language: %1$s</string>
+    <string name="language_system">System Default</string>
+    <string name="language_zh_tw">Traditional Chinese</string>
+    <string name="language_en">English</string>
+    <string name="language_applied">Language preference applied</string>
+    <string name="theme_applied">Theme preference applied</string>
+    <string name="quality_applied">Resolution preference applied</string>
+    <string name="refreshing_channels">Updating channel playlist from remote…</string>
+    <string name="web_data_cleared">Web cache and login data cleared successfully</string>
+    <string name="splash_animation_on">Splash Animation: ON (Lamp Animation)</string>
+    <string name="splash_animation_off">Splash Animation: OFF (Direct Logo)</string>
+    <string name="splash_animation_toast_on">Splash animation enabled (Lamp Animation)</string>
+    <string name="splash_animation_toast_off">Direct Logo mode enabled (No Animation)</string>
+</resources>

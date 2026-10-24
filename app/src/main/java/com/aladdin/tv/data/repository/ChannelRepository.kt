@@ -1229,6 +1229,12 @@ class ChannelRepository private constructor(context: Context) {
     fun saveQualityPref(pref: Int) = prefs.edit().putInt(AppConfig.PREF_QUALITY_PREF, pref).apply()
     fun getSavedQualityPref(): Int = prefs.getInt(AppConfig.PREF_QUALITY_PREF, AppConfig.QUALITY_AUTO)
 
+    fun saveLanguage(languageCode: String) = prefs.edit().putString(AppConfig.PREF_APP_LANGUAGE, languageCode).apply()
+    fun getSavedLanguage(): String = prefs.getString(AppConfig.PREF_APP_LANGUAGE, AppConfig.LANGUAGE_SYSTEM) ?: AppConfig.LANGUAGE_SYSTEM
+
+    fun isSplashAnimationEnabled(): Boolean = prefs.getBoolean(AppConfig.PREF_SPLASH_ANIMATION_ENABLED, true)
+    fun setSplashAnimationEnabled(enabled: Boolean) = prefs.edit().putBoolean(AppConfig.PREF_SPLASH_ANIMATION_ENABLED, enabled).apply()
+
     private fun saveSourceUpdateInfo(time: String, status: String, count: Int, totalSources: Int) {
         prefs.edit()
             .putString(AppConfig.PREF_LAST_UPDATE_TIME, time)

@@ -29,6 +29,7 @@
         <!-- TV playback intentionally uses either landscape rotation on phones and TV boxes. -->
         <activity
             android:name=".ui.MainActivity"
+            android:theme="@style/Theme.AladdinTV"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:exported="true"
             android:launchMode="singleTask"

@@ -7,9 +7,13 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
+import android.graphics.Typeface
+import android.util.TypedValue
+import androidx.core.content.ContextCompat
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.app.AlertDialog
+import androidx.core.os.LocaleListCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -56,6 +60,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var sourceAdapter: SourceAdapter
 
     private var splashComplete = false
+    private var splashEnterDownReceived = false
     private var isForeground = false
     private var pendingPlayback: (() -> Unit)? = null
 
@@ -130,6 +135,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         repository = ChannelRepository.getInstance(this)
+        applySavedLanguage()
         applySavedTheme()
         val accentStyle = when (repository.getSavedAccentColor()) {
             ChannelRepository.AccentColor.GOLD -> R.style.AladdinAccentGold
@@ -187,7 +193,8 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         isForeground = true
         if (!splashComplete) {
-            binding.lampSplash.start()
+            val animEnabled = repository.isSplashAnimationEnabled()
+            binding.lampSplash.start(staticLogo = !animEnabled)
             binding.lampSplash.resumeAnimation()
             return
         }
@@ -301,6 +308,19 @@ class MainActivity : AppCompatActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             SystemUiUtils.hideSystemBars(window)
+        }
+    }
+
+    private fun applySavedLanguage() {
+        val lang = repository.getSavedLanguage()
+        val targetLocales = when (lang) {
+            AppConfig.LANGUAGE_ZH_TW -> LocaleListCompat.forLanguageTags("zh-TW")
+            AppConfig.LANGUAGE_EN -> LocaleListCompat.forLanguageTags("en")
+            else -> LocaleListCompat.getEmptyLocaleList()
+        }
+        val currentLocales = AppCompatDelegate.getApplicationLocales()
+        if (currentLocales != targetLocales) {
+            AppCompatDelegate.setApplicationLocales(targetLocales)
         }
     }
 
@@ -798,6 +818,16 @@ class MainActivity : AppCompatActivity() {
      * 初始化設定面板控制項與按鈕監聽
      */
     private fun initSettingsPanel() {
+        settings.btnPrivacyPolicy.setOnClickListener {
+            val url = getString(R.string.privacy_policy_url)
+            try {
+                startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+            } catch (_: android.content.ActivityNotFoundException) {
+                AlertDialog.Builder(this).setTitle(R.string.privacy_policy)
+                    .setMessage(getString(R.string.privacy_browser_unavailable, url))
+                    .setPositiveButton(android.R.string.ok, null).show()
+            }
+        }
         val accentNames = resources.getStringArray(R.array.accent_colors)
         settings.btnAccentColor.text = getString(R.string.accent_selected, accentNames[repository.getSavedAccentColor().ordinal])
         settings.btnAccentColor.setOnClickListener {
@@ -811,6 +841,49 @@ class MainActivity : AppCompatActivity() {
                         recreate()
                     }
                 }.setNegativeButton(android.R.string.cancel, null).show()
+        }
+        updateLanguageButtonText()
+        settings.btnLanguage.setOnClickListener {
+            val langCodes = arrayOf(
+                AppConfig.LANGUAGE_SYSTEM,
+                AppConfig.LANGUAGE_ZH_TW,
+                AppConfig.LANGUAGE_EN
+            )
+            val langNames = arrayOf(
+                getString(R.string.language_system),
+                getString(R.string.language_zh_tw),
+                getString(R.string.language_en)
+            )
+            val currentLang = repository.getSavedLanguage()
+            val currentIndex = when (currentLang) {
+                AppConfig.LANGUAGE_ZH_TW -> 1
+                AppConfig.LANGUAGE_EN -> 2
+                else -> 0
+            }
+            AlertDialog.Builder(this)
+                .setTitle(R.string.language_setting)
+                .setSingleChoiceItems(langNames, currentIndex) { dialog, index ->
+                    dialog.dismiss()
+                    val selectedCode = langCodes[index]
+                    if (selectedCode != currentLang) {
+                        repository.saveLanguage(selectedCode)
+                        applySavedLanguage()
+                        updateLanguageButtonText()
+                        updateThemeButtonsState()
+                        updateQualityButtonsState()
+                        Toast.makeText(this, R.string.language_applied, Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+        updateSplashAnimationButtonState()
+        settings.btnToggleSplashAnimation.setOnClickListener {
+            val nextState = !repository.isSplashAnimationEnabled()
+            repository.setSplashAnimationEnabled(nextState)
+            updateSplashAnimationButtonState()
+            val msg = getString(if (nextState) R.string.splash_animation_toast_on else R.string.splash_animation_toast_off)
+            Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
         }
         settings.btnFavoriteChannel.setOnClickListener {
             currentPlayingChannel?.let { repository.toggleFavorite(it) }
@@ -866,6 +939,9 @@ class MainActivity : AppCompatActivity() {
         settings.btnCloseSettings.setOnClickListener {
             hideSettingsPanel()
         }
+        settings.btnBottomCloseSettings.setOnClickListener {
+            hideSettingsPanel()
+        }
 
         // 主題外觀切換
         settings.btnThemeSystem.setOnClickListener { updateTheme(AppConfig.THEME_SYSTEM) }
@@ -879,7 +955,7 @@ class MainActivity : AppCompatActivity() {
 
         // 頻道來源手動更新
         settings.btnRefreshChannels.setOnClickListener {
-            Toast.makeText(this, "正在連線更新頻道來源清單…", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.refreshing_channels), Toast.LENGTH_SHORT).show()
             lifecycleScope.launch {
                 val isSuccess = repository.fetchAndRefreshFromRemote()
                 refreshSettingsSourceInfo()
@@ -894,37 +970,114 @@ class MainActivity : AppCompatActivity() {
             val nextState = !repository.isAutoFallbackEnabled()
             repository.setAutoFallbackEnabled(nextState)
             updateAutoFallbackButtonState()
-            val stateMsg = if (nextState) "已啟用自動備援切換 (故障時自動換線)" else "已關閉自動備援 (手動主導模式)"
+            val stateMsg = getString(if (nextState) R.string.auto_fallback_on else R.string.auto_fallback_off)
             Toast.makeText(this@MainActivity, stateMsg, Toast.LENGTH_SHORT).show()
         }
 
         // 清除網頁快取與登入資料
         settings.btnClearWebData.setOnClickListener {
             binding.youtubePlayerView.clearSiteData()
-            Toast.makeText(this@MainActivity, "已清除本站網頁快取與登入資料", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainActivity, getString(R.string.web_data_cleared), Toast.LENGTH_SHORT).show()
         }
+
+        updateThemeButtonsState()
+        updateQualityButtonsState()
+    }
+
+    private fun updateLanguageButtonText() {
+        if (settingsBinding == null) return
+        val currentLang = repository.getSavedLanguage()
+        val langName = when (currentLang) {
+            AppConfig.LANGUAGE_ZH_TW -> getString(R.string.language_zh_tw)
+            AppConfig.LANGUAGE_EN -> getString(R.string.language_en)
+            else -> getString(R.string.language_system)
+        }
+        settings.btnLanguage.text = getString(R.string.language_selected, langName)
+    }
+
+    private fun updateSplashAnimationButtonState() {
+        if (settingsBinding == null) return
+        val enabled = repository.isSplashAnimationEnabled()
+        settings.btnToggleSplashAnimation.text = getString(
+            if (enabled) R.string.splash_animation_on else R.string.splash_animation_off
+        )
     }
 
     private fun updateAutoFallbackButtonState() {
         if (settingsBinding == null) return
         val isAuto = repository.isAutoFallbackEnabled()
-        settings.btnToggleAutoFallback.text = if (isAuto) {
-            "自動備援切換：已啟用 (故障時自動換線)"
+        settings.btnToggleAutoFallback.text = getString(if (isAuto) R.string.auto_fallback_on else R.string.auto_fallback_off)
+    }
+
+    private fun updateThemeButtonsState() {
+        if (settingsBinding == null) return
+        val currentTheme = repository.getSavedTheme()
+        val accentColor = resolveThemeColor(R.attr.tvAccent, ContextCompat.getColor(this, R.color.tv_accent))
+        val secondaryColor = ContextCompat.getColor(this, R.color.tv_text_secondary)
+
+        val themeButtons = listOf(
+            Triple(settings.btnThemeSystem, AppConfig.THEME_SYSTEM, R.string.theme_system),
+            Triple(settings.btnThemeDark, AppConfig.THEME_DARK, R.string.theme_dark),
+            Triple(settings.btnThemeLight, AppConfig.THEME_LIGHT, R.string.theme_light)
+        )
+
+        themeButtons.forEach { (btn, mode, strRes) ->
+            val isSelected = (currentTheme == mode)
+            btn.isSelected = isSelected
+            val baseText = getString(strRes)
+            btn.text = if (isSelected) "✓ $baseText" else baseText
+            btn.setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
+            btn.setTextColor(if (isSelected) accentColor else secondaryColor)
+        }
+    }
+
+    private fun updateQualityButtonsState() {
+        if (settingsBinding == null) return
+        val currentQuality = repository.getSavedQualityPref()
+        val accentColor = resolveThemeColor(R.attr.tvAccent, ContextCompat.getColor(this, R.color.tv_accent))
+        val secondaryColor = ContextCompat.getColor(this, R.color.tv_text_secondary)
+
+        val qualityButtons = listOf(
+            Triple(settings.btnQualityAuto, AppConfig.QUALITY_AUTO, R.string.quality_auto),
+            Triple(settings.btnQuality1080p, AppConfig.QUALITY_1080P, R.string.quality_1080p),
+            Triple(settings.btnQuality4k, AppConfig.QUALITY_4K, R.string.quality_4k)
+        )
+
+        qualityButtons.forEach { (btn, pref, strRes) ->
+            val isSelected = (currentQuality == pref)
+            btn.isSelected = isSelected
+            val baseText = getString(strRes)
+            btn.text = if (isSelected) "✓ $baseText" else baseText
+            btn.setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
+            btn.setTextColor(if (isSelected) accentColor else secondaryColor)
+        }
+    }
+
+    private fun resolveThemeColor(attr: Int, defaultColor: Int): Int {
+        val typedValue = TypedValue()
+        return if (theme.resolveAttribute(attr, typedValue, true)) {
+            if (typedValue.resourceId != 0) {
+                ContextCompat.getColor(this, typedValue.resourceId)
+            } else {
+                typedValue.data
+            }
         } else {
-            "自動備援切換：已關閉 (手動主導)"
+            defaultColor
         }
     }
 
     private fun updateTheme(themeMode: Int) {
         repository.saveTheme(themeMode)
+        updateThemeButtonsState()
         applySavedTheme()
-        Toast.makeText(this, "主題外觀已套用", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.theme_applied), Toast.LENGTH_SHORT).show()
     }
 
     private fun updateQualityPref(pref: Int) {
         repository.saveQualityPref(pref)
+        updateQualityButtonsState()
         playerManager.setQualityPreference(pref)
-        Toast.makeText(this, "畫質偏好上限已套用", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, getString(R.string.quality_applied), Toast.LENGTH_SHORT).show()
     }
 
     private fun showSettingsPanel() {
@@ -942,6 +1095,9 @@ class MainActivity : AppCompatActivity() {
         refreshSettingsSourceInfo()
         refreshPlaybackDiagnostics()
         updateAutoFallbackButtonState()
+        updateSplashAnimationButtonState()
+        updateThemeButtonsState()
+        updateQualityButtonsState()
         settings.root.isVisible = true
         currentControlMode = TvControlMode.PANEL_OPEN
         binding.youtubePlayerView.setFocusIsolationEnabled(true)
@@ -1723,7 +1879,16 @@ class MainActivity : AppCompatActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!splashComplete) {
             if (event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)) {
-                if (event.action == KeyEvent.ACTION_UP) binding.lampSplash.finish()
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    if (binding.lampSplash.canSkipNow()) {
+                        splashEnterDownReceived = true
+                    }
+                } else if (event.action == KeyEvent.ACTION_UP) {
+                    if (splashEnterDownReceived && binding.lampSplash.canSkipNow()) {
+                        binding.lampSplash.finish()
+                    }
+                    splashEnterDownReceived = false
+                }
                 return true
             }
             if (event.keyCode != KeyEvent.KEYCODE_BACK && event.keyCode != KeyEvent.KEYCODE_VOLUME_UP && event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return true
@@ -2084,6 +2249,29 @@ class MainActivity : AppCompatActivity() {
                 return false
             }
         })
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.action == MotionEvent.ACTION_DOWN) {
+            val settingsView = settingsBinding?.root
+            if (settingsView?.isVisible == true) {
+                val outRect = android.graphics.Rect()
+                settingsView.getGlobalVisibleRect(outRect)
+                if (!outRect.contains(ev.rawX.toInt(), ev.rawY.toInt())) {
+                    hideSettingsPanel()
+                    return true
+                }
+            }
+            if (binding.layoutSourceSelection.isVisible) {
+                val outRect = android.graphics.Rect()
+                binding.layoutSourceSelection.getGlobalVisibleRect(outRect)
+                if (!outRect.contains(ev.rawX.toInt(), ev.rawY.toInt())) {
+                    hideSourceSelectionPanel()
+                    return true
+                }
+            }
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     @SuppressLint("ClickableViewAccessibility")

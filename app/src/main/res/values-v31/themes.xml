@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ (API 31+) 專屬主題：拔除系統啟動畫面中央突兀的白色底板與圖示，使冷啟動與神燈動畫純黑背景無縫銜接 -->
+    <style name="Theme.AladdinTV" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="tvAccent">@color/tv_accent</item>
+        <item name="tvFocusStroke">@color/tv_focus_stroke</item>
+        <item name="tvTextHighlight">@color/tv_text_highlight</item>
+        <item name="colorAccent">?attr/tvAccent</item>
+        <item name="android:windowBackground">@color/tv_background</item>
+        <item name="android:colorBackground">@color/tv_background</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:keepScreenOn">true</item>
+        <item name="android:statusBarColor">@color/transparent</item>
+        <item name="android:navigationBarColor">@color/transparent</item>
+
+        <!-- 消除 Android 12+ 突兀白底 SplashScreen -->
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowSplashScreenBackground">#12141A</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_transparent</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/transparent</item>
+    </style>
+</resources>

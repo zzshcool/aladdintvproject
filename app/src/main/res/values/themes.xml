@@ -17,6 +17,7 @@
         <item name="android:keepScreenOn">true</item>
         <item name="android:statusBarColor">@color/transparent</item>
         <item name="android:navigationBarColor">@color/transparent</item>
+        <item name="android:windowDisablePreview">true</item>
     </style>
     <style name="AladdinAccentGold">
         <item name="tvAccent">@color/tv_accent</item>

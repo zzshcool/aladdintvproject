@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="阿拉丁TV (Aladdin TV) 隱私政策（中英文版）。詳細說明本機資料儲存、系統權限用途、第三方服務、Cookie 與資料刪除方式。Privacy Policy for Aladdin TV (Traditional Chinese & English).">
+<title>隱私政策 / Privacy Policy · 阿拉丁TV (Aladdin TV)</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f8f9fb;
+  --panel: #ffffff;
+  --text: #1f2328;
+  --heading: #0f1419;
+  --muted: #57606a;
+  --link: #0969da;
+  --line: #d0d7de;
+  --card-bg: #f6f8fa;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --badge-bg: #e1e4e8;
+  --badge-text: #24292e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --text: #c9d1d9;
+    --heading: #f0f6fc;
+    --muted: #8b949e;
+    --link: #58a6ff;
+    --line: #30363d;
+    --card-bg: #21262d;
+    --accent: #388bfd;
+    --accent-text: #ffffff;
+    --badge-bg: #30363d;
+    --badge-text: #c9d1d9;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+}
+.container {
+  max-width: 920px;
+  margin: 32px auto;
+  padding: 40px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+}
+@media (max-width: 768px) {
+  .container {
+    margin: 0;
+    padding: 24px 18px;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+header {
+  border-bottom: 2px solid var(--line);
+  padding-bottom: 24px;
+  margin-bottom: 28px;
+}
+.app-meta {
+  display: inline-block;
+  padding: 4px 10px;
+  background: var(--badge-bg);
+  color: var(--badge-text);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+h1 {
+  color: var(--heading);
+  font-size: 1.95rem;
+  line-height: 1.3;
+  margin: 0 0 14px 0;
+}
+h2 {
+  color: var(--heading);
+  font-size: 1.35rem;
+  margin-top: 36px;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+h3 {
+  color: var(--heading);
+  font-size: 1.1rem;
+  margin-top: 22px;
+  margin-bottom: 10px;
+}
+p, ul, ol {
+  margin: 0 0 16px 0;
+}
+ul, ol {
+  padding-left: 24px;
+}
+li {
+  margin-bottom: 8px;
+}
+a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+a:hover {
+  text-decoration-thickness: 2px;
+}
+.meta-info {
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+.lang-switcher {
+  display: flex;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.lang-switcher span {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+.lang-btn {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+.lang-btn:hover {
+  border-color: var(--accent);
+}
+.lang-btn.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.callout {
+  background: var(--card-bg);
+  border-left: 4px solid var(--accent);
+  padding: 16px 18px;
+  margin: 20px 0;
+  border-radius: 0 8px 8px 0;
+  font-size: 0.95rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 18px 0;
+  font-size: 0.95rem;
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+th {
+  background: var(--card-bg);
+  color: var(--heading);
+  font-weight: 600;
+}
+footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-align: center;
+}
+.hidden-section {
+  display: none !important;
+}
+</style>
+<script>
+function switchLang(lang) {
+  var zhSec = document.getElementById('section-zh');
+  var enSec = document.getElementById('section-en');
+  var btnZh = document.getElementById('btn-zh');
+  var btnEn = document.getElementById('btn-en');
+  if (lang === 'en') {
+    zhSec.classList.add('hidden-section');
+    enSec.classList.remove('hidden-section');
+    btnEn.classList.add('active');
+    btnZh.classList.remove('active');
+    document.documentElement.lang = 'en';
+    if (history.replaceState) {
+      history.replaceState(null, null, '#en');
+    }
+  } else {
+    enSec.classList.add('hidden-section');
+    zhSec.classList.remove('hidden-section');
+    btnZh.classList.add('active');
+    btnEn.classList.remove('active');
+    document.documentElement.lang = 'zh-Hant';
+    if (history.replaceState) {
+      history.replaceState(null, null, '#zh-tw');
+    }
+  }
+}
+window.addEventListener('DOMContentLoaded', function() {
+  if (window.location.hash === '#en') {
+    switchLang('en');
+  } else {
+    switchLang('zh');
+  }
+});
+</script>
+</head>
+<body>
+<div class="container">
+
+  <div class="lang-switcher">
+    <span>語言 / Language:</span>
+    <button id="btn-zh" class="lang-btn active" onclick="switchLang('zh')">繁體中文 (Traditional Chinese)</button>
+    <button id="btn-en" class="lang-btn" onclick="switchLang('en')">English</button>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- 繁體中文版 (Traditional Chinese Version) -->
+  <!-- ========================================== -->
+  <article id="section-zh" class="lang-section">
+    <header>
+      <div class="app-meta">ALADDIN TV · PRIVACY POLICY</div>
+      <h1>阿拉丁TV 隱私政策</h1>
+      <div class="meta-info">
+        <strong>生效與更新日期：</strong>2026 年 10 月 24 日<br>
+        <strong>應用程式名稱：</strong>阿拉丁TV（Aladdin TV）<br>
+        <strong>套件名稱（Package Name）：</strong>com.aladdin.tv<br>
+        <strong>開發者／維護者：</strong>阿拉丁TV 開源專案（GitHub @zzshcool）<br>
+        <strong>適用平台：</strong>Android 手機、平板、Android TV 及電視盒設備
+      </div>
+    </header>
+
+    <div class="callout">
+      本政策詳細說明「阿拉丁TV」（以下簡稱「本應用」或「App」）如何處理您的資料，以及當您透過本應用觀看第三方影音直播與官方網頁時涉及的資料互動。本應用為輕量化電視直播播放器，<strong>無自有帳號系統，亦未架設任何接收個人可識別資訊（PII）或觀看紀錄的遠端後端伺服器</strong>。
+    </div>
+
+    <h2>1. 我們處理與儲存在裝置上的資料</h2>
+    <p>為了提供穩定的播放體驗與個人化偏好，本應用僅在您的<strong>本地裝置專屬儲存空間</strong>內保留以下資料：</p>
+    <ul>
+      <li><strong>頻道與串流位址快取：</strong>包括頻道清單、播放線路 URL、YouTube 直播 ID、解析快取及更新時間戳記，用於減少網路重複請求並提升載入速度。</li>
+      <li><strong>個人化觀看偏好：</strong>您的頻道收藏清單、最近播放歷史、自訂隱藏頻道列表、最後播放的頻道與手動指定的播放線路。</li>
+      <li><strong>使用者介面與播放設定：</strong>深色／淺色外觀主題、主題色彩偏好、畫面比例（完整顯示或滿版裁切）、畫質偏好（自動、最高 1080p、4K 支援）及自動線路備援切換開關。</li>
+      <li><strong>播放品質與診斷資料：</strong>各線路在本機的連線成功／失敗次數、錯誤原因、回應時間，僅存於本地，用於介面燈號狀態指示（綠／黃／紅／灰燈）及自動切換可用線路。</li>
+      <li><strong>內嵌網頁資料與 Cookie：</strong>當載入第三方官方授權網頁或播放器（如 YouTube、ofiii、四季線上）時，系統內嵌 WebView 會儲存該網站運作所需之網頁快取、網站資料與 Cookie。若您在第三方官方頁面操作登入，該網站會保留其登入 Session。</li>
+    </ul>
+
+    <h2>2. 我們「不」收集的個人資料</h2>
+    <p>本應用堅守隱私極小化原則：</p>
+    <ul>
+      <li><strong>不收集個人身份資訊（PII）：</strong>我們不要求註冊帳號，不收集亦不詢問您的姓名、身分證字號、電話號碼、電子郵件地址、實體地址或通訊錄。</li>
+      <li><strong>不收集敏感硬體識別碼：</strong>我們不讀取、不追蹤亦不儲存 IMEI、IMSI、MAC 位址、硬體序號或廣告識別碼（GAID/IDFA）。</li>
+      <li><strong>無自營雲端追蹤後端：</strong>本應用開發者未架設任何用於追蹤使用者行為、蒐集個人點擊流或分析觀看喜好的伺服器。</li>
+    </ul>
+
+    <h2>3. 使用的 Android 系統權限與用途</h2>
+    <p>本應用僅宣告為達成影音播放所不可或缺之最小系統權限，絕無多餘或越權要求：</p>
+    <table>
+      <thead>
+        <tr>
+          <th scope="col" style="width: 32%;">系統權限名稱</th>
+          <th scope="col">具體用途與技術必要性說明</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>android.permission.INTERNET</code></td>
+          <td>必要權限。用於自遠端下載頻道清單、連線至第三方影音串流伺服器播放即時直播視訊，以及載入官方授權的播放網頁。</td>
+        </tr>
+        <tr>
+          <td><code>android.permission.ACCESS_NETWORK_STATE</code></td>
+          <td>必要權限。用於即時偵測網路連線狀態（如 Wi-Fi、有線網路或行動網路），在斷網時主動暫停無效請求並向使用者提示連線狀態，避免程式異常崩潰。</td>
+        </tr>
+        <tr>
+          <td><code>android.permission.WAKE_LOCK</code></td>
+          <td>必要權限。在全螢幕播放影音期間維持 CPU 運作並避免螢幕逾時自動休眠，確保電視與行動端觀看連續性。在非播放或離開主畫面時自動釋放。</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>明確聲明：</strong>本應用<strong>未申請亦不使用</strong>相機（CAMERA）、麥克風（RECORD_AUDIO）、地理位置（ACCESS_FINE_LOCATION / ACCESS_COARSE_LOCATION）、通訊錄（READ_CONTACTS）、日曆（CALENDAR）或外部檔案存取（READ_EXTERNAL_STORAGE / MANAGE_EXTERNAL_STORAGE）等敏感權限。</p>
+
+    <h2>4. 網路連線與第三方服務宣告</h2>
+    <p>當您播放節目或更新來源時，您的設備會直接與相應的伺服器建立網路連線。連線過程中，第三方伺服器基於網際網路標準協定，可能會自動記錄您的公開 IP 位址、User-Agent 標頭及請求時間。相關第三方服務說明如下：</p>
+    <ul>
+      <li><strong>YouTube／Google LLC：</strong>部分頻道使用官方 YouTube IFrame 嵌入播放器或 YouTube 觀看頁面。播放與互動受 <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google 隱私權政策</a> 及 <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube 服務條款</a> 約束。</li>
+      <li><strong>第三方電視台與串流授權商（如 ofiii、四季線上 4gTV、電視台官網）：</strong>官方網頁模式下，該站台可能載入其自家的廣告、流量統計、登入驗證與 Cookie。其資料收集與隱私權處理均由該網站所屬公司負責，適用該網站公告之隱私政策。</li>
+      <li><strong>GitHub / GitHub Pages：</strong>本應用之公開頻道種子清單及本隱私政策頁面託管於 GitHub 平台。請求該頁面時將受 <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub 隱私權聲明</a> 約束。</li>
+    </ul>
+
+    <h2>5. 帳號、廣告與分析工具</h2>
+    <ul>
+      <li><strong>無本應用帳號：</strong>本應用不設自營帳號系統，亦無任何要求您輸入帳號密碼之自建介面。請勿將任何個人密碼提供給開發者。</li>
+      <li><strong>無自營廣告與追蹤 SDK：</strong>本應用原始碼中未整合 Google AdMob、Unity Ads、Facebook Audience Network 或任何商業廣告 SDK，亦無 Firebase Analytics、Flurry 等第三方數據分析工具。但第三方官方播放網頁本身可能包含其平台自有的廣告內容與流量統計代碼。</li>
+    </ul>
+
+    <h2>6. Cookie 與網頁儲存資料管理</h2>
+    <p>為支援官方網頁模式的正常播放，系統 WebView 會遵循標準瀏覽器架構管理 Cookie 與網站儲存空間。您可以隨時透過以下方式自主清除：</p>
+    <ul>
+      <li><strong>應用程式內一鍵清除：</strong>進入「設定」面板，點擊「清除網頁快取與登入資料」，即可徹底清空 WebView 的所有網頁快取、暫存檔案、Cookie 及本機資料庫。</li>
+      <li><strong>第三方帳號安全：</strong>若您曾在第三方官方網頁登入其平台會員，執行上述清除將會登出該平台；如欲註銷第三方平台帳號，請至各官方網站依其規定申請。</li>
+    </ul>
+
+    <h2>7. 資料保留政策與使用者權利（資料刪除說明）</h2>
+    <p>符合 Google Play 與各應用市集之「使用者資料刪除」規範，由於本應用無雲端伺服器儲存使用者資料，所有資料均在您的實體設備上：</p>
+    <ol>
+      <li><strong>刪除收藏與歷史紀錄：</strong>您可隨時在頻道列表中取消收藏、重設隱藏頻道或自訂清單。</li>
+      <li><strong>清除所有應用程式資料：</strong>請開啟 Android 系統「設定」&gt;「應用程式」&gt; 找到「阿拉丁TV」&gt; 點擊「儲存空間與快取」&gt; 選擇「清除儲存空間 / 清除資料」。此動作將永久抹除該設備上本應用的所有偏好、自訂設定及暫存。</li>
+      <li><strong>解除安裝應用程式：</strong>在設備上解除安裝阿拉丁TV，系統將自動刪除屬於本應用的本地沙盒儲存資料。</li>
+      <li><strong>系統備份附註：</strong>若您啟用了 Android 系統級「自動備份」（Android Backup Service），系統可能於雲端備份少量本機偏好；如欲刪除，可於 Google 雲端硬碟備份管理中移除該應用備份。</li>
+    </ol>
+
+    <h2>8. 網路通訊安全（Cleartext 傳輸說明）</h2>
+    <p>本應用預設支援安全傳輸（HTTPS）。然而，台灣部分廣播電視台對外公開之即時 HLS 串流訊號現階段仍採用標準 HTTP 協定傳輸。為保證該類公共電視台頻道的正常收看，本應用於資訊清單中宣告了 <code>usesCleartextTraffic="true"</code>。此連線僅用於傳輸公開電視影音串流封包，不包含任何使用者個人資訊或敏感帳密。</p>
+
+    <h2>9. 兒童隱私保護（Children's Privacy / COPPA）</h2>
+    <p>本應用為通用型電視直播串流輔助工具，並非針對 13 歲（或您所在司法管轄區法定年齡）以下之兒童特別設計。我們絕不會故意或主動蒐集兒童的任何個人身份資料。若家長或法定監護人發現兒童透過第三方網頁提供了個人資料，請利用第三方服務之管道或參考本政策第 6、7 點清除設備快取與資料。</p>
+
+    <h2>10. 隱私政策之修訂</h2>
+    <p>我們可能會因應法規變更、應用程式功能升級或服務調整，不定期修訂本隱私政策。修訂後之最新內容將即時發布於本頁面，並更新頁首之「生效與更新日期」。建議您定期查閱以瞭解最新規範。</p>
+
+    <h2>11. 聯絡我們與問題回報</h2>
+    <p>若您對本隱私政策有任何疑問、建議，或需回報隱私安全相關疑慮，可透過以下管道聯絡：</p>
+    <ul>
+      <li><strong>專案開源社群：</strong><a href="https://github.com/zzshcool/aladdintvproject/issues" target="_blank" rel="noopener noreferrer">Aladdin TV GitHub Issues</a></li>
+      <li><strong>專案儲存庫首頁：</strong><a href="https://github.com/zzshcool/aladdintvproject" target="_blank" rel="noopener noreferrer">https://github.com/zzshcool/aladdintvproject</a></li>
+    </ul>
+    <p class="meta-info">注意：GitHub Issues 為公開討論空間，請切勿在 Issue 中張貼任何包含個人密碼、金鑰或敏感隱私之資訊。</p>
+  </article>
+
+  <!-- ========================================== -->
+  <!-- 英文版 (English Version) -->
+  <!-- ========================================== -->
+  <article id="section-en" class="lang-section hidden-section">
+    <header>
+      <div class="app-meta">ALADDIN TV · PRIVACY POLICY</div>
+      <h1>Privacy Policy for Aladdin TV</h1>
+      <div class="meta-info">
+        <strong>Effective &amp; Last Updated Date:</strong> October 24, 2026<br>
+        <strong>Application Name:</strong> Aladdin TV (阿拉丁TV)<br>
+        <strong>Package Name:</strong> com.aladdin.tv<br>
+        <strong>Developer / Maintainer:</strong> Aladdin TV Open Source Project (GitHub @zzshcool)<br>
+        <strong>Applicable Platforms:</strong> Android Phones, Tablets, Android TV, and TV Box Devices
+      </div>
+    </header>
+
+    <div class="callout">
+      This Privacy Policy details how "Aladdin TV" (referred to as "the App", "we", "us", or "our") processes your data, as well as data exchanges that may occur when you stream media or view official web pages through the App. Aladdin TV is a lightweight live TV stream player. <strong>We do not operate our own user account system, nor do we run remote backend servers to collect or receive personally identifiable information (PII) or viewing history.</strong>
+    </div>
+
+    <h2>1. Information We Collect and Store Locally</h2>
+    <p>To deliver a smooth playback experience and preserve your user preferences, the App only stores the following data in your <strong>device's local isolated storage</strong>:</p>
+    <ul>
+      <li><strong>Channel &amp; Stream Source Cache:</strong> Channel playlists, stream source URLs, YouTube Live IDs, resolution cache, and update timestamps to prevent redundant network requests and enhance loading speeds.</li>
+      <li><strong>Personalized Viewing Preferences:</strong> Favorite channel lists, recent playback history, hidden channels, last-watched channel, and manually selected stream routes.</li>
+      <li><strong>Interface &amp; Playback Configurations:</strong> Dark/Light theme mode, accent color selections, aspect ratio choices (original vs. crop to fill), video quality preferences (Auto, up to 1080p, 4K allowed), and automatic backup stream switching toggles.</li>
+      <li><strong>Playback Diagnostics:</strong> Local playback success/failure counters, failure reasons, and response times. These are saved purely on the local device to render status indicators (green/yellow/red/gray lights) and assist in automated fallback route selection.</li>
+      <li><strong>Embedded Web Data &amp; Cookies:</strong> When loading official third-party web players (e.g., YouTube, ofiii, 4gTV), the system WebView stores necessary web cache, local storage, and cookies. If you log in on an official provider's page, that provider maintains your login session within the WebView.</li>
+    </ul>
+
+    <h2>2. Information We Do NOT Collect</h2>
+    <p>We strictly adhere to the principle of data minimization:</p>
+    <ul>
+      <li><strong>No Personally Identifiable Information (PII):</strong> We do not require account registration. We never collect, request, or store your legal name, national ID, phone number, email address, physical address, or contacts.</li>
+      <li><strong>No Hardware Identifiers:</strong> We do not access, track, or collect persistent hardware identifiers such as IMEI, IMSI, MAC addresses, serial numbers, or advertising IDs (GAID/IDFA).</li>
+      <li><strong>No Proprietary Tracking Backend:</strong> The developer does not operate any cloud analytics servers to log user behavioral analytics, track clickstreams, or profile watching habits.</li>
+    </ul>
+
+    <h2>3. Android System Permissions &amp; Purposes</h2>
+    <p>The App requests only the minimum necessary permissions strictly required to execute media streaming functions:</p>
+    <table>
+      <thead>
+        <tr>
+          <th scope="col" style="width: 32%;">Permission Name</th>
+          <th scope="col">Purpose &amp; Technical Justification</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>android.permission.INTERNET</code></td>
+          <td>Mandatory. Required to fetch remote channel playlists, connect to third-party live video stream servers for real-time playback, and load official authorized web pages.</td>
+        </tr>
+        <tr>
+          <td><code>android.permission.ACCESS_NETWORK_STATE</code></td>
+          <td>Mandatory. Required to inspect real-time network connectivity (e.g., Wi-Fi, Ethernet, cellular), pause redundant requests during disconnects, and present connection status to prevent abnormal crashes.</td>
+        </tr>
+        <tr>
+          <td><code>android.permission.WAKE_LOCK</code></td>
+          <td>Mandatory. Keeps the CPU awake and prevents the screen from going to sleep while actively playing full-screen video, ensuring uninterrupted viewing on TV and mobile screens. Released immediately when playback stops.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p><strong>Explicit Disclosure:</strong> The App <strong>does not request or access</strong> sensitive permissions such as Camera (<code>CAMERA</code>), Microphone (<code>RECORD_AUDIO</code>), Precise/Coarse Location (<code>ACCESS_FINE_LOCATION</code>), Contacts (<code>READ_CONTACTS</code>), Calendar, or External Storage (<code>READ_EXTERNAL_STORAGE</code> / <code>MANAGE_EXTERNAL_STORAGE</code>).</p>
+
+    <h2>4. Network Communications &amp; Third-Party Services</h2>
+    <p>When you stream a channel or update playlists, your device connects directly to the relevant content servers. Over standard Internet protocols, third-party servers may automatically receive your public IP address, User-Agent header, and request timestamp. Specific services include:</p>
+    <ul>
+      <li><strong>YouTube / Google LLC:</strong> Some channels utilize YouTube's official IFrame embedded player or official watch page. Playback and interactions are governed by the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Privacy Policy</a> and <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube Terms of Service</a>.</li>
+      <li><strong>Third-Party Broadcasters &amp; Portals (e.g., ofiii, 4gTV, official TV network websites):</strong> When operating in web mode, these sites may serve their own advertisements, analytics scripts, authentication cookies, and session handlers under their respective privacy policies.</li>
+      <li><strong>GitHub / GitHub Pages:</strong> The public channel seed list and this Privacy Policy are hosted on GitHub Pages. Requests are subject to the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub Privacy Statement</a>.</li>
+    </ul>
+
+    <h2>5. Accounts, Ads, and Analytics</h2>
+    <ul>
+      <li><strong>No App Account:</strong> Aladdin TV has no registration system. We do not provide proprietary forms to collect credentials. Never send passwords or personal credentials to the developer.</li>
+      <li><strong>No Proprietary Ad / Analytics SDKs:</strong> We do not integrate commercial ad network SDKs (such as AdMob, Unity Ads, or Meta Audience Network) or behavioral analytics SDKs (such as Firebase Analytics or Flurry) in the App binary. Any advertisements encountered originate from third-party web streams and are governed by those providers.</li>
+    </ul>
+
+    <h2>6. Cookies and Web Storage Management</h2>
+    <p>To support official web playback, the Android system WebView manages cookies and local web storage according to web standards. You can clear this data at any time:</p>
+    <ul>
+      <li><strong>In-App Clear Cache:</strong> Navigate to the "Settings" panel inside the App and tap "Clear Web Cache &amp; Login Data". This will purge all WebView cache files, cookies, and local database entries immediately.</li>
+      <li><strong>Third-Party Accounts:</strong> If you logged into an official service inside the WebView, using the in-app clear feature will log you out of that session. To delete a third-party account permanently, follow that provider's account deletion procedures.</li>
+    </ul>
+
+    <h2>7. Data Retention &amp; User Deletion Rights (App Store Compliance)</h2>
+    <p>In compliance with Google Play Store and general app marketplace user data deletion policies, since we operate no remote cloud database for personal user data, all data resides entirely on your physical device:</p>
+    <ol>
+      <li><strong>Deleting Favorites and History:</strong> You can un-favorite items, restore hidden channels, or clear lists directly inside the user interface.</li>
+      <li><strong>Clearing All Application Data:</strong> Open Android OS "Settings" &gt; "Apps" &gt; "Aladdin TV" &gt; "Storage &amp; cache" &gt; select "Clear Storage" or "Clear Data". This permanently erases all local caches, custom preferences, and history from the device.</li>
+      <li><strong>Uninstalling the App:</strong> Uninstalling Aladdin TV automatically removes all sandboxed files and local application data associated with the App.</li>
+      <li><strong>System Backups:</strong> If Android Auto-Backup is enabled on your device, minimal preference settings may be backed up to your Google account. You can manage or delete this via your Google Drive backup management settings.</li>
+    </ol>
+
+    <h2>8. Data Transmission Security &amp; Cleartext Traffic Disclosure</h2>
+    <p>The App prioritizes secure connections (HTTPS). However, certain traditional Taiwanese television broadcasters publish their public live HLS streaming signals over legacy HTTP protocols. To enable playback for these public channels, the App specifies <code>usesCleartextTraffic="true"</code> in its manifest. These connections transmit only publicly available audio/video packets and never transmit sensitive personal credentials.</p>
+
+    <h2>9. Children's Privacy (COPPA Compliance)</h2>
+    <p>Aladdin TV is a general-purpose live television player utility and is not directed to children under the age of 13 (or the legal age of consent in your jurisdiction). We do not knowingly or intentionally collect any personal information from children. If parents or legal guardians become aware that a child has submitted personal data via third-party web pages, please utilize the cache-clearing methods described in Sections 6 and 7, or contact the third-party website directly.</p>
+
+    <h2>10. Changes to This Privacy Policy</h2>
+    <p>We may update this Privacy Policy from time to time to reflect modifications in our App, legal requirements, or regulatory standards. The revised version will be published on this URL with an updated "Effective &amp; Last Updated Date". We encourage you to review this page periodically.</p>
+
+    <h2>11. Contact Us</h2>
+    <p>If you have questions, feedback, or concerns regarding this Privacy Policy, please reach out to us through the following channels:</p>
+    <ul>
+      <li><strong>GitHub Issues:</strong> <a href="https://github.com/zzshcool/aladdintvproject/issues" target="_blank" rel="noopener noreferrer">Aladdin TV GitHub Issues</a></li>
+      <li><strong>Repository:</strong> <a href="https://github.com/zzshcool/aladdintvproject" target="_blank" rel="noopener noreferrer">https://github.com/zzshcool/aladdintvproject</a></li>
+    </ul>
+    <p class="meta-info">Please Note: GitHub Issues are public forums. Do not post private credentials, passwords, or personal identifying information in public issue threads.</p>
+  </article>
+
+  <footer>
+    <p><a href="https://github.com/zzshcool/aladdintvproject" target="_blank" rel="noopener noreferrer">Aladdin TV Open Source Project (GitHub)</a></p>
+    <p>&copy; 2026 Aladdin TV. All rights reserved.</p>
+  </footer>
+
+</div>
+</body>
+</html>
