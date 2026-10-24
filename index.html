@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="阿拉丁TV Aladdin TV 隱私政策：本機觀看紀錄、第三方播放器、Cookie、權限與資料清除方式。">
+<title>隱私政策 · 阿拉丁TV Aladdin TV</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f6f8;--panel:#fff;--text:#20232b;--muted:#576170;--link:#1765b5;--line:#dce0e5}
+@media(prefers-color-scheme:dark){:root{--bg:#12141a;--panel:#1c2029;--text:#f3f4f6;--muted:#b8c1ce;--link:#87c4ff;--line:#343c49}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:17px/1.85 system-ui,-apple-system,"Noto Sans TC",sans-serif}main{max-width:860px;margin:40px auto;padding:36px;background:var(--panel);border:1px solid var(--line);border-radius:16px}h1{font-size:2rem;line-height:1.35}h2{font-size:1.25rem;margin-top:2rem}a{color:var(--link);overflow-wrap:anywhere}a:focus-visible{outline:3px solid var(--link);outline-offset:3px}.meta,footer{color:var(--muted)}li{margin:.5rem 0}table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:12px;border:1px solid var(--line)}@media(max-width:600px){main{margin:0;padding:24px 18px;border:0;border-radius:0}body{font-size:16px}h1{font-size:1.6rem}}
+</style>
+</head>
+<body><main>
+<header><p class="meta">ALADDIN TV · PRIVACY POLICY</p><h1>阿拉丁TV 隱私政策</h1><p class="meta">生效與更新日期：2026 年 10 月 24 日<br>應用程式：阿拉丁TV（Aladdin TV） · com.aladdin.tv<br>維護者：GitHub 使用者 zzshcool</p></header>
+<p>本政策說明阿拉丁TV Android 應用程式如何處理資料，以及觀看第三方直播時可能發生的資料傳輸。App 是電視直播播放器，沒有自有帳號系統，也沒有供維護者接收觀看紀錄的自建後端服務。這不代表觀看直播不會向第三方傳送資料。</p>
+<h2>1. 儲存在裝置上的資料</h2>
+<ul><li>頻道清單與串流位址快取、YouTube 動態直播 ID 與解析時間，用於載入及更新播放來源。</li><li>收藏、最近成功觀看的頻道、隱藏頻道、最後播放頻道與手動選擇的線路。</li><li>外觀模式、主題色、畫質偏好、自動備援選項等設定。</li><li>播放成功／失敗次數、時間、錯誤原因及來源狀態，用於顯示診斷與選擇線路。</li><li>內嵌網頁的 Cookie、網站儲存空間與快取；使用者若在第三方官方頁面登入，該網站可能藉此維持登入狀態。</li></ul>
+<p>上述 App 設定與頻道紀錄通常存於 App 專用儲存空間。現行版本允許 Android 系統備份；依裝置、系統備份規則及使用者設定，部分資料可能由 Android 備份服務備份或在換機時移轉，因此不能保證全部資料永遠只留在單一裝置。</p>
+<h2>2. 網路連線與第三方服務</h2>
+<p>更新清單、解析直播及播放影音時，App 會連線到對應的清單／影音伺服器。伺服器可能收到 IP 位址、User-Agent、請求時間、觀看目標網址及播放所需的 HTTP 標頭。官方網頁可能另外載入廣告、分析、Cookie 或登入服務；其資料處理由各服務提供者負責。</p>
+<ul><li>YouTube／Google：官方嵌入播放器或觀看網頁。參閱 <a href="https://policies.google.com/privacy">Google 隱私權政策</a>。</li><li>ofiii、四季線上（4gTV）、電視台官網及其他播放來源：適用該網站顯示的隱私政策及服務條款。廣告、登入與地區限制由提供者決定。</li><li>GitHub／GitHub Pages：提供公開頻道清單或本政策頁面的託管；請求可能由 GitHub 處理。參閱 <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub 隱私權聲明</a>。</li></ul>
+<p>本政策不代替第三方網站的政策。App 不提供付費頻道訂閱、不保證所有節目免費，也不保證任何來源持續可用。部分既有串流使用 HTTP，該連線的請求及影音資料可能未加密。</p>
+<h2>3. 帳號、廣告與分析</h2>
+<p>App 不要求建立阿拉丁TV帳號，也不提供自行收集帳號密碼的登入表單。若在官方網頁操作登入，資料會交由該網站及其登入服務處理，網站可能在 WebView 中保留登入資料。請勿將帳密提供給維護者。</p>
+<p>目前版本未整合由維護者營運的廣告投放、使用行為分析或雲端崩潰回報 SDK。官方播放器或網頁仍可能顯示廣告並使用其自己的分析服務，不能將 App 描述為完全無廣告或完全無追蹤。</p>
+<h2>4. 使用的 Android 權限</h2>
+<table><thead><tr><th scope="col">權限</th><th scope="col">用途</th></tr></thead><tbody><tr><td>INTERNET</td><td>下載頻道清單、解析及播放直播、開啟官方網頁。</td></tr><tr><td>ACCESS_NETWORK_STATE</td><td>讀取網路連線狀態。</td></tr><tr><td>WAKE_LOCK</td><td>支援播放期間維持裝置喚醒。</td></tr></tbody></table>
+<p>目前版本未宣告相機、麥克風、聯絡人、精確位置或外部儲存空間讀取權限。</p>
+<h2>5. 資料保留與刪除</h2>
+<ul><li>可於 App「設定 → 清除網頁快取與登入資料」清除 App WebView 的快取、Cookie 及網站儲存資料；這不會刪除第三方帳號，也不會刪除 App 收藏與觀看紀錄。</li><li>可取消收藏、調整設定及恢復隱藏頻道。若需清除全部本機設定、頻道快取及觀看紀錄，請使用 Android「設定 → 應用程式 → 阿拉丁TV → 儲存空間 → 清除資料」（選項名稱依裝置而異）。</li><li>解除安裝通常會移除 App 的本機資料。若啟用 Android 備份，備份中的資料須依系統及備份服務提供的方式另行管理，重新安裝也可能還原資料。</li><li>第三方網站持有的帳號、廣告或請求資料，須依該服務的流程申請存取或刪除。</li></ul>
+<h2>6. 診斷與問題回報</h2>
+<p>App 可能輸出播放、網址、來源與按鍵診斷資訊到裝置系統日誌，供開發與除錯使用；目前不會由 App 自動上傳給維護者。若自行提交截圖或日誌，維護者會使用你提供的資訊處理問題。請先移除帳密、Cookie、Token、帶有授權參數的網址及其他個人資料。</p>
+<h2>7. 兒童使用</h2>
+<p>本 App 並非專為兒童設計，也沒有兒童專用帳號或內容過濾機制。節目與廣告由第三方服務提供，請監護人協助判斷適合觀看的內容及第三方網站使用方式。</p>
+<h2>8. 政策更新與聯絡方式</h2>
+<p>若 App 的資料處理方式改變，將更新本頁及更新日期。你可以透過 <a href="https://github.com/zzshcool/aladdintvproject/issues">Aladdin TV GitHub Issues</a> 提出隱私疑問。Issues 是公開頁面，請勿張貼敏感資料；需要非公開聯絡時，可先提出不含敏感資訊的聯絡請求。</p>
+<footer><p><a href="https://github.com/zzshcool/aladdintvproject">返回專案儲存庫</a></p></footer>
+</main></body></html>
