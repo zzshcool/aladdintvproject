@@ -587,4 +587,14 @@
             android:textSize="13sp" />
     </LinearLayout>
 
+    <com.aladdin.tv.ui.view.LampSplashView
+        android:id="@+id/lampSplash"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:elevation="32dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

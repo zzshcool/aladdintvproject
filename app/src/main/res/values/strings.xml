@@ -108,4 +108,5 @@
         <item>綠色</item>
         <item>紫色</item>
     </string-array>
+    <string name="splash_description">阿拉丁神燈啟動動畫，點擊或按確認鍵略過</string>
 </resources>

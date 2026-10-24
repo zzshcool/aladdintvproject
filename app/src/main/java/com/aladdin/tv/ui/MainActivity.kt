@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var channelAdapter: ChannelAdapter
     private lateinit var sourceAdapter: SourceAdapter
 
+    private var splashComplete = false
     private var isForeground = false
     private var pendingPlayback: (() -> Unit)? = null
 
@@ -146,6 +147,18 @@ class MainActivity : AppCompatActivity() {
         playerManager = AladdinPlayerManager(this, lifecycleScope)
         playerManager.setQualityPreference(repository.getSavedQualityPref())
 
+        splashComplete = savedInstanceState?.getBoolean("splash_complete") == true
+        binding.lampSplash.onFinished = {
+            splashComplete = true
+            if (isForeground) {
+                binding.youtubePlayerView.resumeVideo()
+                playerManager.setPlayWhenReady(true)
+                pendingPlayback?.let { pending -> pendingPlayback = null; pending() }
+            }
+            binding.rootContainer.requestFocus()
+        }
+        if (splashComplete) binding.lampSplash.isVisible = false
+
         initViews()
         binding.rootContainer.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
             if (right - left != oldRight - oldLeft) applyResponsiveLayout(right - left)
@@ -165,6 +178,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("splash_complete", splashComplete)
         outState.putBoolean("settings_open", settingsBinding?.root?.isVisible == true)
         super.onSaveInstanceState(outState)
     }
@@ -172,6 +186,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         isForeground = true
+        if (!splashComplete) {
+            binding.lampSplash.start()
+            binding.lampSplash.resumeAnimation()
+            return
+        }
         binding.youtubePlayerView.resumeVideo()
         SystemUiUtils.hideSystemBars(window)
         playerManager.setPlayWhenReady(currentPlayingChannel?.currentSource?.type == StreamType.HLS || currentPlayingChannel == null)
@@ -191,6 +210,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         isForeground = false
+        binding.lampSplash.pauseAnimation()
         if (youtubeResolveJob?.isActive == true) {
             val channel = currentPlayingChannel
             youtubeResolveJob?.cancel()
@@ -1179,7 +1199,7 @@ class MainActivity : AppCompatActivity() {
      * 核心播放調度器：統一處理首次播放、重試與備援切換，嚴格隔離舊工作階段與雙重聲音
      */
     private fun playChannelStream(channel: Channel, sourceIndex: Int, isAutoFallback: Boolean, refreshingLiveId: Boolean = false) {
-        if (!isForeground) {
+        if (!isForeground || !splashComplete) {
             pendingPlayback = { playChannelStream(channel, sourceIndex, isAutoFallback, refreshingLiveId) }
             return
         }
@@ -1701,6 +1721,13 @@ class MainActivity : AppCompatActivity() {
      * 電視盒統一按鍵路由核心 (在 Window 層級分流，徹底杜絕 WebView 搶奪電視控制焦點)
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!splashComplete) {
+            if (event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+                if (event.action == KeyEvent.ACTION_UP) binding.lampSplash.finish()
+                return true
+            }
+            if (event.keyCode != KeyEvent.KEYCODE_BACK && event.keyCode != KeyEvent.KEYCODE_VOLUME_UP && event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return true
+        }
         logKeyEvent(event, "dispatch")
         val keyCode = event.keyCode
         val action = event.action
