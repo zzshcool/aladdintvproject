@@ -23,6 +23,7 @@ class LampSplashView @JvmOverloads constructor(
     private var progress = 0f
     private var animator: ValueAnimator? = null
     private var finished = false
+    private var loadingMode = false
     var onFinished: (() -> Unit)? = null
 
     private val lamp = arrayOf(
@@ -65,6 +66,41 @@ class LampSplashView @JvmOverloads constructor(
         }
     }
 
+    fun useAsLoadingIndicator() {
+        loadingMode = true
+        isClickable = false
+        isFocusable = false
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        setOnClickListener(null)
+        syncLoadingAnimation()
+    }
+
+    private fun syncLoadingAnimation() {
+        if (!loadingMode) return
+        if (!isShown || windowVisibility != VISIBLE) {
+            cancelAnimation()
+            return
+        }
+        if (animator != null) return
+        animator = ValueAnimator.ofFloat(.18f, .60f).apply {
+            duration = 1600L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener { progress = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        syncLoadingAnimation()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        syncLoadingAnimation()
+    }
+
     fun pauseAnimation() { animator?.pause() }
     fun resumeAnimation() { animator?.resume() }
 
@@ -91,8 +127,8 @@ class LampSplashView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(Color.rgb(18, 20, 26))
-        val size = minOf(width / 112f, height / 76f)
+        if (!loadingMode) canvas.drawColor(Color.rgb(18, 20, 26))
+        val size = if (loadingMode) minOf(width / 42f, height / 56f) else minOf(width / 112f, height / 76f)
         canvas.save()
         canvas.translate(width / 2f, height / 2f)
         canvas.scale(size, size)
@@ -127,6 +163,10 @@ class LampSplashView @JvmOverloads constructor(
                 setBounds(-22, -25, 22, 19)
                 draw(canvas)
             }
+        }
+        if (loadingMode) {
+            canvas.restore()
+            return
         }
         paint.color = Color.rgb(245, 245, 247)
         paint.alpha = 255

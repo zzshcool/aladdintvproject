@@ -109,4 +109,12 @@
         <item>紫色</item>
     </string-array>
     <string name="splash_description">阿拉丁神燈啟動動畫，點擊或按確認鍵略過</string>
+    <string name="loading_connecting">正在連線…</string>
+    <string name="loading_resolving">正在尋找 YouTube 直播…</string>
+    <string name="loading_buffering">正在緩衝…</string>
+    <string name="loading_slow">連線較慢，可重試或選擇其他線路</string>
+    <string name="loading_dismiss">收起</string>
+    <string name="loading_channel">CH %1$02d · %2$s</string>
+    <string name="loading_resolution_timeout">尋找直播逾時，請重試或選擇其他線路</string>
+    <string name="loading_source_timeout">目前線路載入逾時，請重試或選擇其他線路</string>
 </resources>
