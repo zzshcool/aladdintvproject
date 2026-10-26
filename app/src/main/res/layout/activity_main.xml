@@ -166,34 +166,84 @@
     <!-- 4. 緩衝與載入中浮層 -->
     <LinearLayout
         android:id="@+id/layoutLoading"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="12dp"
         android:background="@drawable/bg_overlay_panel"
         android:gravity="center"
-        android:orientation="horizontal"
-        android:paddingHorizontal="24dp"
-        android:paddingVertical="14dp"
+        android:orientation="vertical"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp"
+        android:accessibilityLiveRegion="polite"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintWidth_max="560dp">
 
-        <ProgressBar
-            android:layout_width="26dp"
-            android:layout_height="26dp"
-            android:indeterminate="true"
-            android:indeterminateTint="?attr/tvAccent" />
-
-        <TextView
-            android:id="@+id/tvLoadingText"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="14dp"
-            android:text="@string/buffering"
-            android:textColor="@color/tv_text_primary"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <com.aladdin.tv.ui.view.LampSplashView
+                android:id="@+id/loadingLamp"
+                android:layout_width="42dp"
+                android:layout_height="56dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvLoadingChannel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textColor="?attr/tvAccent"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvLoadingText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/buffering"
+                    android:textColor="@color/tv_text_primary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnLoadingDismiss"
+                style="?android:attr/buttonBarButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:minWidth="48dp"
+                android:paddingHorizontal="8dp"
+                android:textSize="12sp"
+                android:text="@string/loading_dismiss" />
+        </LinearLayout>
+
+        <HorizontalScrollView
+            android:id="@+id/loadingActions"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:scrollbars="none"
+            android:visibility="gone">
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent" android:orientation="horizontal">
+                <Button style="?android:attr/buttonBarButtonStyle" android:id="@+id/btnLoadingRetry" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/btn_retry" />
+                <Button style="?android:attr/buttonBarButtonStyle" android:id="@+id/btnLoadingSources" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/touch_sources" />
+                <Button style="?android:attr/buttonBarButtonStyle" android:id="@+id/btnLoadingChannels" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/return_channel_list" />
+                <Button style="?android:attr/buttonBarButtonStyle" android:id="@+id/btnLoadingWeb" android:layout_width="wrap_content" android:layout_height="48dp" android:minWidth="48dp" android:paddingHorizontal="8dp" android:textSize="12sp" android:text="@string/touch_web" />
+            </LinearLayout>
+        </HorizontalScrollView>
     </LinearLayout>
 
     <!-- 5. 錯誤與重試提示浮層 -->

@@ -198,8 +198,9 @@ class ChannelRepository private constructor(context: Context) {
                     "daai_2" -> "Ch3TWYTID"
                     else -> null
                 }.takeIf { handle.equals("@DaAiVideo", ignoreCase = true) }
+                val ctsNews = handle.trim().equals("@CtsTw", ignoreCase = true)
                 val targetUrl = if (daaiField != null) "https://daai.tv/channel/1"
-                    else "https://www.youtube.com/$encoded/live"
+                    else "https://www.youtube.com/$encoded/${if (ctsNews) "streams" else "live"}"
                 val request = Request.Builder()
                     .url(targetUrl)
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -230,11 +231,12 @@ class ChannelRepository private constructor(context: Context) {
                     val body = response.third
                     val id = if (daaiField != null) {
                         Regex("\"$daaiField\"\\s*:\"([A-Za-z0-9_-]{11})\"").find(body)?.groupValues?.get(1)
-                    } else parseYouTubeLiveResponse(body, response.second.queryParameter("v"), cleanHandle)
+                    } else if (ctsNews) parseCtsNewsLiveListing(body)
+                    else parseYouTubeLiveResponse(body, response.second.queryParameter("v"), cleanHandle)
                     if (id == null) return@withLock null
                     val resolvedAt = System.currentTimeMillis()
                     ytLiveCache[cleanHandle] = id to resolvedAt
-                    prefs.edit().putString("yt_live_$cleanHandle", JSONObject().put("id", id).put("time", resolvedAt).toString()).apply()
+                    prefs.edit().putString(youTubeResolutionPreferenceKey(cleanHandle), JSONObject().put("id", id).put("time", resolvedAt).toString()).apply()
                     id
                 }
             } catch (cancelled: CancellationException) {
@@ -251,7 +253,7 @@ class ChannelRepository private constructor(context: Context) {
         val key = handle.trim()
         ytLiveCache[key]?.let { return it }
         return try {
-            val saved = JSONObject(prefs.getString("yt_live_$key", null) ?: return null)
+            val saved = JSONObject(prefs.getString(youTubeResolutionPreferenceKey(key), null) ?: return null)
             val id = saved.getString("id")
             if (!Regex("[A-Za-z0-9_-]{11}").matches(id)) return null
             (id to saved.getLong("time")).also { ytLiveCache[key] = it }
@@ -264,7 +266,7 @@ class ChannelRepository private constructor(context: Context) {
             return
         }
         ytLiveCache.remove(handle.trim())
-        prefs.edit().remove("yt_live_${handle.trim()}").apply()
+        prefs.edit().remove(youTubeResolutionPreferenceKey(handle.trim())).apply()
     }
 
     fun isFavorite(channel: Channel) = prefs.getStringSet("favorite_channels", emptySet())!!.contains(channel.canonicalId)
@@ -1515,7 +1517,7 @@ class ChannelRepository private constructor(context: Context) {
                     StreamSource(
                         url = "https://www.youtube.com/@CtsTw/live",
                         type = StreamType.YOUTUBE,
-                        youtubeVideoId = "KMMHw8rllic",
+                        youtubeVideoId = "wM0g8EoUZ_E",
                         liveChannelHandle = "@CtsTw",
                         label = "官方YouTube 24H",
                         tvgId = "CTSNews.tw",
@@ -1893,6 +1895,8 @@ internal fun parseYouTubeLiveResponse(body: String, redirectedId: String?, handl
         if (end == -1) return null
         val player = JSONObject(body.substring(start, end))
         val details = player.optJSONObject("videoDetails") ?: return null
+        if (handle.trim().equals("@CtsTw", ignoreCase = true) &&
+            !isCtsNewsMainLiveTitle(details.optString("title"))) return null
         val microformat = player.optJSONObject("microformat")?.optJSONObject("playerMicroformatRenderer")
         val live = microformat?.optJSONObject("liveBroadcastDetails")
         val id = details.optString("videoId")
@@ -1908,6 +1912,74 @@ internal fun parseYouTubeLiveResponse(body: String, redirectedId: String?, handl
             player.optJSONObject("playabilityStatus")?.optString("status") != "OK" ||
             !(redirectedId == id || ownerMatches)) return null
         id
+    } catch (_: Exception) {
+        null
+    }
+}
+
+internal fun youTubeResolutionPreferenceKey(handle: String): String =
+    if (handle.trim().equals("@CtsTw", ignoreCase = true)) "yt_live_@CtsTw_news_v2" else "yt_live_${handle.trim()}"
+
+internal fun isCtsNewsMainLiveTitle(title: String): Boolean {
+    val normalized = title.lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+    if (listOf("地震", "監測", "觀測站", "氣象", "earthquake", "weather").any { it in normalized }) return false
+    return "華視新聞直播" in normalized && ("ch52" in normalized || "24小時" in normalized || "24時間" in normalized)
+}
+
+internal fun parseCtsNewsLiveListing(body: String): String? {
+    return try {
+        val marker = Regex("""(?:var\s+)?ytInitialData\s*=\s*\{""").find(body) ?: return null
+        val start = body.indexOf('{', marker.range.first)
+        var depth = 0
+        var quoted = false
+        var escaped = false
+        var end = -1
+        for (i in start until body.length) {
+            val c = body[i]
+            if (quoted) {
+                if (escaped) escaped = false else if (c == '\\') escaped = true else if (c == '"') quoted = false
+            } else when (c) {
+                '"' -> quoted = true
+                '{' -> depth++
+                '}' -> { depth--; if (depth == 0) { end = i + 1; break } }
+            }
+        }
+        if (end == -1) return null
+        val data = JSONObject(body.substring(start, end))
+        val candidates = linkedSetOf<String>()
+        fun visit(value: Any?) {
+            when (value) {
+                is JSONObject -> {
+                    val card = value.optJSONObject("lockupViewModel")
+                    val renderer = value.optJSONObject("videoRenderer")
+                    if (card != null) {
+                        val id = card.optString("contentId")
+                        val title = card.optJSONObject("metadata")?.optJSONObject("lockupMetadataViewModel")
+                            ?.optJSONObject("title")?.optString("content").orEmpty()
+                        val overlays = card.optJSONObject("contentImage")?.optJSONObject("thumbnailViewModel")?.optJSONArray("overlays")
+                        if (Regex("[A-Za-z0-9_-]{11}").matches(id) && isCtsNewsMainLiveTitle(title) &&
+                            overlays?.toString()?.contains("THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE") == true) candidates.add(id)
+                    }
+                    if (renderer != null) {
+                        val id = renderer.optString("videoId")
+                        val titleData = renderer.optJSONObject("title")
+                        val runs = titleData?.optJSONArray("runs")
+                        val title = titleData?.optString("simpleText").orEmpty().ifEmpty {
+                            buildString { if (runs != null) for (i in 0 until runs.length()) append(runs.optJSONObject(i)?.optString("text").orEmpty()) }
+                        }
+                        val live = renderer.optJSONArray("badges")?.toString()?.contains("BADGE_STYLE_TYPE_LIVE_NOW") == true ||
+                            renderer.optJSONArray("thumbnailOverlays")?.toString()?.contains("\"style\":\"LIVE\"") == true
+                        if (Regex("[A-Za-z0-9_-]{11}").matches(id) && isCtsNewsMainLiveTitle(title) && live) candidates.add(id)
+                    }
+                    val keys = value.keys()
+                    while (keys.hasNext()) visit(value.opt(keys.next()))
+                }
+                is JSONArray -> for (i in 0 until value.length()) visit(value.opt(i))
+            }
+        }
+        // Only inspect channel content; recommendations and unrelated metadata are not candidates.
+        visit(data.optJSONObject("contents"))
+        candidates.singleOrNull()
     } catch (_: Exception) {
         null
     }

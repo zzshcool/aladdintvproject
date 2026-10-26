@@ -2,6 +2,7 @@ package com.aladdin.tv.ui
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -16,6 +17,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.os.LocaleListCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.Player
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.aladdin.tv.R
 import com.aladdin.tv.config.AppConfig
@@ -34,6 +36,8 @@ import com.aladdin.tv.util.SystemUiUtils
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -97,6 +101,9 @@ class MainActivity : AppCompatActivity() {
     private var ytStablePlaybackJob: Job? = null
     private var bufferingWatchdogJob: Job? = null
     private var webWatchWatchdogJob: Job? = null
+    private val loadingState = PlaybackLoadingState()
+    private var loadingFeedbackJob: Job? = null
+    private var nativeLoadingListener: Player.Listener? = null
     private var healthExpiryScanJob: Job? = null
     private val numberInputBuffer = StringBuilder()
 
@@ -149,6 +156,7 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        binding.loadingLamp.useAsLoadingIndicator()
 
         playerManager = AladdinPlayerManager(this, lifecycleScope)
         playerManager.setQualityPreference(repository.getSavedQualityPref())
@@ -208,6 +216,9 @@ class MainActivity : AppCompatActivity() {
         }
         val channel = currentPlayingChannel
         if (channel != null) {
+            if (loadingState.feedback(SystemClock.elapsedRealtime()) != null) {
+                beginLoading(channel, currentAttemptId, youtubeResolveJob?.isActive == true)
+            }
             // 恢復前台時重新建立有期限的播放監測，不因背景暫停扣除來源健康分數
             if (webAdPlaying) startAdWatchdog(channel, currentAttemptId)
             else if (confirmedWebAttemptId != currentAttemptId)
@@ -217,6 +228,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         isForeground = false
+        loadingFeedbackJob?.cancel()
+        binding.layoutLoading.isVisible = false
         binding.lampSplash.pauseAnimation()
         if (youtubeResolveJob?.isActive == true) {
             val channel = currentPlayingChannel
@@ -240,6 +253,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        loadingFeedbackJob?.cancel()
+        clearNativeLoadingListener()
         pendingPlayback = null
         youtubeResolveJob?.cancel()
         adWatchdogJob?.cancel()
@@ -335,6 +350,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun initViews() {
         playerManager.attachPlayerView(binding.playerView)
+        binding.btnLoadingDismiss.setOnClickListener { dismissLoading() }
+        binding.btnLoadingRetry.setOnClickListener {
+            currentPlayingChannel?.let { playChannelStream(it, it.currentSourceIndex, false) }
+        }
+        binding.btnLoadingSources.setOnClickListener { showSourceSelectionPanel() }
+        binding.btnLoadingChannels.setOnClickListener { showDrawer() }
+        binding.btnLoadingWeb.setOnClickListener { enterWebInteraction() }
 
         playerManager.onChannelHealthChanged = health@{ channelId, status, message ->
             if (!isForeground || channelId != currentPlayingChannel?.id) return@health
@@ -506,10 +528,11 @@ class MainActivity : AppCompatActivity() {
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
                 if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (loadingState.finished) return
                 if (!webAdPlaying && confirmedWebAttemptId != attemptId && bufferingWatchdogJob?.isActive != true) {
                     startBufferingWatchdog(currentPlayingChannel, attemptId)
                 }
-                binding.layoutLoading.isVisible = false
+                completeLoading(attemptId)
                 binding.layoutYoutubeError.isVisible = false
             }
 
@@ -522,7 +545,11 @@ class MainActivity : AppCompatActivity() {
                 isLiveConfirmed: Boolean
             ) {
                 if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (loadingState.finished) return
                 val channel = currentPlayingChannel ?: return
+                completeLoading(attemptId)
+                bufferingWatchdogJob?.cancel()
+                webWatchWatchdogJob?.cancel()
                 if (!isLiveConfirmed) {
                     lastDiagAttemptResult = "網頁媒體播放中／直播狀態未確認"
                     return
@@ -537,7 +564,6 @@ class MainActivity : AppCompatActivity() {
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
                 confirmedWebAttemptId = attemptId
-                binding.layoutLoading.isVisible = false
                 binding.layoutYoutubeError.isVisible = false
 
                 val currentUrl = channel.currentSource?.url ?: ""
@@ -580,10 +606,11 @@ class MainActivity : AppCompatActivity() {
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
                 if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (loadingState.finished || webAdPlaying) return
                 val channel = currentPlayingChannel ?: return
                 confirmedWebAttemptId = -1L
                 ytStablePlaybackJob?.cancel()
-                binding.layoutLoading.isVisible = true
+                showBufferingFeedback(attemptId)
                 startBufferingWatchdog(channel, attemptId)
 
                 val msg = if (channel.currentSourceIndex > 0) {
@@ -606,7 +633,7 @@ class MainActivity : AppCompatActivity() {
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
                 ytStablePlaybackJob?.cancel()
-                binding.layoutLoading.isVisible = false
+                completeLoading(attemptId)
                 currentPlayingChannel?.let { channel ->
                     repository.updateChannelHealth(channel.id, ChannelHealthStatus.UNKNOWN, "播放已暫停", channel.currentSourceIndex, channel.streamSources.size)
                 }
@@ -634,9 +661,12 @@ class MainActivity : AppCompatActivity() {
 
             override fun onAdStateChanged(attemptId: Long, channelId: String, sourceId: String, isAdPlaying: Boolean) {
                 if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (loadingState.finished) return
                 if (webAdAttemptId == attemptId && webAdPlaying == isAdPlaying) return
                 webAdAttemptId = attemptId
                 webAdPlaying = isAdPlaying
+                loadingState.ad(attemptId, isAdPlaying, SystemClock.elapsedRealtime())
+                watchLoadingFeedback()
                 val channel = currentPlayingChannel ?: return
                 if (isAdPlaying) {
                     startAdWatchdog(channel, attemptId)
@@ -644,7 +674,6 @@ class MainActivity : AppCompatActivity() {
                     // 廣告播放中：暫停緩衝看門狗，避免廣告期間被誤判逾時換線
                     bufferingWatchdogJob?.cancel()
                     webWatchWatchdogJob?.cancel()
-                    binding.layoutLoading.isVisible = false
                     repository.updateChannelHealth(
                         channel.id,
                         ChannelHealthStatus.CONNECTING,
@@ -666,7 +695,7 @@ class MainActivity : AppCompatActivity() {
                 val channel = currentPlayingChannel ?: return
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
-                binding.layoutLoading.isVisible = false
+                finishLoading()
                 showManualPlaybackError(channel, "此來源需要官方登入，目前不支援在 TV 播放")
             }
 
@@ -680,7 +709,7 @@ class MainActivity : AppCompatActivity() {
                 bufferingWatchdogJob?.cancel()
                 ytStablePlaybackJob?.cancel()
                 webWatchWatchdogJob?.cancel()
-                binding.layoutLoading.isVisible = false
+                finishLoading()
 
                 val channel = currentPlayingChannel ?: return
                 val failedUrl = channel.currentSource?.url ?: ""
@@ -708,7 +737,7 @@ class MainActivity : AppCompatActivity() {
                 bufferingWatchdogJob?.cancel()
                 ytStablePlaybackJob?.cancel()
                 webWatchWatchdogJob?.cancel()
-                binding.layoutLoading.isVisible = false
+                finishLoading()
 
                 val channel = currentPlayingChannel ?: return
                 val failedUrl = channel.currentSource?.url ?: ""
@@ -734,6 +763,7 @@ class MainActivity : AppCompatActivity() {
                             currentAttemptId++
                             val webAttemptId = currentAttemptId
                             youtubeWebWatch = true
+                            beginLoading(channel, webAttemptId)
                             binding.youtubePlayerView.loadWebWatch(channel.id, sourceId, webAttemptId, vid)
                             startWebWatchWatchdog(channel, sourceId, webAttemptId)
                             return
@@ -762,7 +792,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
-                binding.layoutLoading.isVisible = false
+                finishLoading()
                 binding.layoutYoutubeError.isVisible = true
                 binding.tvYoutubeErrorMsg.text = getString(R.string.youtube_autoplay_blocked)
                 binding.btnYoutubeRetry.text = getString(R.string.btn_play_manual)
@@ -776,6 +806,7 @@ class MainActivity : AppCompatActivity() {
             if (binding.btnYoutubeRetry.text == getString(R.string.btn_play_manual)) {
                 binding.btnYoutubeRetry.text = getString(R.string.btn_retry)
                 currentPlayingChannel?.let { ch ->
+                    beginLoading(ch, currentAttemptId)
                     startBufferingWatchdog(ch, currentAttemptId)
                 }
                 binding.youtubePlayerView.triggerManualPlay()
@@ -801,6 +832,7 @@ class MainActivity : AppCompatActivity() {
                     currentAttemptId++
                     val webAttemptId = currentAttemptId
                     youtubeWebWatch = true
+                    beginLoading(ch, webAttemptId)
                     Toast.makeText(this@MainActivity, getString(R.string.youtube_switching_web_watch), Toast.LENGTH_SHORT).show()
                     binding.youtubePlayerView.loadWebWatch(ch.id, src?.sourceId ?: "", webAttemptId, vid)
                     startWebWatchWatchdog(ch, src?.sourceId ?: "", webAttemptId)
@@ -1081,6 +1113,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSettingsPanel() {
+        dismissLoading()
         if (settingsBinding == null) {
             settingsBinding = PanelSettingsBinding.bind(binding.settingsStub.inflate())
             initSettingsPanel()
@@ -1297,17 +1330,13 @@ class MainActivity : AppCompatActivity() {
 
                 when (state) {
                     is PlayerState.Idle -> {
-                        binding.layoutLoading.isVisible = false
-                        binding.layoutError.isVisible = false
+                        // Idle can occur during prepare; it is not evidence of a rendered frame.
                     }
                     is PlayerState.Buffering -> {
-                        binding.layoutLoading.isVisible = true
-                        binding.layoutError.isVisible = false
-                        startBufferingWatchdog(currentPlayingChannel, currentAttemptId)
+                        showBufferingFeedback(currentAttemptId)
                     }
                     is PlayerState.Playing -> {
-                        bufferingWatchdogJob?.cancel()
-                        binding.layoutLoading.isVisible = false
+                        if (loadingState.feedback(SystemClock.elapsedRealtime()) == null) bufferingWatchdogJob?.cancel()
                         binding.layoutError.isVisible = false
                         val nowStr = SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.getDefault()).format(Date())
                         lastDiagSuccessTime = nowStr
@@ -1320,7 +1349,7 @@ class MainActivity : AppCompatActivity() {
                         currentPlayingChannel?.let { repository.rememberWatchedChannel(it) }
                     }
                     is PlayerState.Error -> {
-                        binding.layoutLoading.isVisible = false
+                        finishLoading()
                         binding.layoutError.isVisible = true
                         binding.tvErrorMsg.text = state.message
                         binding.tvErrorRetryCountdown.text =
@@ -1360,6 +1389,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         pendingPlayback = null
+        clearNativeLoadingListener()
+        finishLoading()
         youtubeResolveJob?.cancel()
         activeYouTubeVideoId = null
         youtubeWebWatch = false
@@ -1400,6 +1431,8 @@ class MainActivity : AppCompatActivity() {
             showPlaybackExhausted(activeChannel, getString(R.string.status_all_sources_failed))
             return
         }
+        beginLoading(activeChannel, attemptId,
+            currentSource.type == StreamType.YOUTUBE && !currentSource.liveChannelHandle.isNullOrBlank())
 
         if (!isAutoFallback) {
             triedSourceIds.clear()
@@ -1420,6 +1453,7 @@ class MainActivity : AppCompatActivity() {
 
         repository.saveLastChannel(activeChannel.id, activeChannel.url)
         showOsd(activeChannel)
+        renderLoadingFeedback()
 
         val connectingMsg = if (activeChannel.streamSources.size > 1) {
             getString(R.string.status_switching_backup, sourceIndex + 1, activeChannel.streamSources.size)
@@ -1453,16 +1487,27 @@ class MainActivity : AppCompatActivity() {
                 val defaultVideoId = currentSource.youtubeVideoId?.takeIf { Regex("[A-Za-z0-9_-]{11}").matches(it) }
                 val handle = currentSource.liveChannelHandle
                 if (!handle.isNullOrBlank()) {
-                    bufferingWatchdogJob?.cancel()
                     youtubeResolveJob = lifecycleScope.launch {
-                        val resolved = repository.resolveYouTubeLiveVideoId(handle, activeChannel.canonicalId)
-                        if (isForeground && currentAttemptId == attemptId) {
+                        val resolved = try {
+                            withTimeout(AppConfig.YOUTUBE_LOAD_TIMEOUT_MS) {
+                                repository.resolveYouTubeLiveVideoId(handle, activeChannel.canonicalId)
+                            }
+                        } catch (_: TimeoutCancellationException) {
+                            if (isForeground && currentAttemptId == attemptId && !loadingState.finished) {
+                                showManualPlaybackError(activeChannel, getString(R.string.loading_resolution_timeout))
+                            }
+                            return@launch
+                        }
+                        if (isForeground && currentAttemptId == attemptId && !loadingState.finished) {
+                            loadingState.connecting(attemptId)
+                            watchLoadingFeedback()
                             activeYouTubeVideoId = resolved
                             startBufferingWatchdog(activeChannel, attemptId)
                             if (resolved != null) {
                                 binding.youtubePlayerView.loadIFrame(activeChannel.id, sourceId, attemptId, resolved)
                             } else {
                                 youtubeWebWatch = true
+                                bufferingWatchdogJob?.cancel()
                                 val target = currentYouTubeWatchTarget()
                                 binding.youtubePlayerView.loadWebWatch(activeChannel.id, sourceId, attemptId, target)
                                 startWebWatchWatchdog(activeChannel, sourceId, attemptId)
@@ -1505,6 +1550,7 @@ class MainActivity : AppCompatActivity() {
                 binding.tvOsdResolution.text = currentSource.label ?: "LIVE"
                 playerManager.setPlayWhenReady(isForeground)
                 playerManager.play(activeChannel, sessionToken)
+                watchNativeLoading(activeChannel, attemptId)
                 binding.rootContainer.requestFocus()
             }
         }
@@ -1513,6 +1559,9 @@ class MainActivity : AppCompatActivity() {
     private fun currentYouTubeWatchTarget(): String {
         activeYouTubeVideoId?.let { return "https://www.youtube.com/watch?v=$it" }
         val source = currentPlayingChannel?.currentSource ?: return ""
+        if (source.liveChannelHandle?.trim().equals("@CtsTw", ignoreCase = true)) {
+            return "https://www.youtube.com/@CtsTw/streams"
+        }
         source.liveChannelHandle?.takeIf { it.startsWith("@") && !it.equals("@DaAiVideo", ignoreCase = true) }?.let {
             return "https://www.youtube.com/@${java.net.URLEncoder.encode(it.substring(1), "UTF-8")}/live"
         }
@@ -1552,8 +1601,118 @@ class MainActivity : AppCompatActivity() {
             }.setNegativeButton(android.R.string.cancel, null).show()
     }
 
+    private fun beginLoading(channel: Channel, attemptId: Long, resolving: Boolean = false) {
+        loadingState.begin(attemptId, SystemClock.elapsedRealtime(), resolving)
+        binding.tvLoadingChannel.text = getString(R.string.loading_channel, channel.number, channel.name)
+        watchLoadingFeedback()
+    }
+
+    private fun watchLoadingFeedback() {
+        loadingFeedbackJob?.cancel()
+        renderLoadingFeedback()
+        if (!isForeground || !loadingState.awaitingFeedback) return
+        loadingFeedbackJob = lifecycleScope.launch {
+            while (isForeground && loadingState.awaitingFeedback) {
+                delay(200L)
+                renderLoadingFeedback()
+            }
+        }
+    }
+
+    private fun renderLoadingFeedback() {
+        val feedback = loadingState.feedback(SystemClock.elapsedRealtime())
+        val visible = isForeground && splashComplete && feedback?.visible == true &&
+            !binding.layoutError.isVisible && !binding.layoutYoutubeError.isVisible &&
+            !binding.layoutDrawer.isVisible && !binding.layoutSourceSelection.isVisible &&
+            settingsBinding?.root?.isVisible != true && currentControlMode != TvControlMode.WEB_INTERACTION
+        val hadFocus = binding.layoutLoading.hasFocus()
+        binding.layoutLoading.isVisible = visible
+        if (!visible) {
+            if (hadFocus) binding.rootContainer.requestFocus()
+            return
+        }
+        binding.layoutOsd.isVisible = false
+        val message = getString(when {
+            feedback?.slow == true -> R.string.loading_slow
+            feedback?.phase == PlaybackLoadingState.Phase.RESOLVING -> R.string.loading_resolving
+            feedback?.phase == PlaybackLoadingState.Phase.BUFFERING -> R.string.loading_buffering
+            else -> R.string.loading_connecting
+        })
+        if (binding.tvLoadingText.text.toString() != message) binding.tvLoadingText.text = message
+        binding.loadingActions.isVisible = feedback?.slow == true
+        binding.btnLoadingWeb.isVisible = binding.youtubePlayerView.isVisible &&
+            (youtubeWebWatch || currentPlayingChannel?.currentSource?.type == StreamType.WEB_VIEW)
+    }
+
+    private fun dismissLoading() {
+        loadingState.dismiss(currentAttemptId)
+        loadingFeedbackJob?.cancel()
+        renderLoadingFeedback()
+    }
+
+    private fun finishLoading() {
+        loadingState.finish(currentAttemptId)
+        loadingFeedbackJob?.cancel()
+        renderLoadingFeedback()
+    }
+
+    private fun completeLoading(attemptId: Long) {
+        if (attemptId != currentAttemptId || loadingState.finished) return
+        val wasVisible = binding.layoutLoading.isVisible
+        loadingState.playing(attemptId)
+        if (currentPlayingChannel?.currentSource?.type == StreamType.HLS) bufferingWatchdogJob?.cancel()
+        loadingFeedbackJob?.cancel()
+        renderLoadingFeedback()
+        if (wasVisible && isForeground) currentPlayingChannel?.let { showOsd(it) }
+    }
+
+    private fun showBufferingFeedback(attemptId: Long) {
+        if (webAdPlaying) return
+        loadingState.buffering(attemptId, SystemClock.elapsedRealtime())
+        watchLoadingFeedback()
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private fun clearNativeLoadingListener() {
+        nativeLoadingListener?.let { binding.playerView.player?.removeListener(it) }
+        nativeLoadingListener = null
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private fun watchNativeLoading(channel: Channel, attemptId: Long) {
+        val player = binding.playerView.player ?: return
+        var firstFrameRendered = false
+        fun isCurrent() = attemptId == currentAttemptId &&
+            currentPlayingChannel?.currentSource?.type == StreamType.HLS &&
+            player.currentMediaItem?.localConfiguration?.uri.toString() == channel.url
+        nativeLoadingListener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                if (!isCurrent()) return
+                firstFrameRendered = true
+                if (isForeground && player.isPlaying) completeLoading(attemptId)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isForeground && isCurrent() && isPlaying && firstFrameRendered) completeLoading(attemptId)
+            }
+
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                if (isCurrent()) firstFrameRendered = false
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (!isForeground || !isCurrent() || playbackState != Player.STATE_BUFFERING) return
+                if (loadingState.finished) beginLoading(channel, attemptId)
+                showBufferingFeedback(attemptId)
+                binding.layoutError.isVisible = false
+                startBufferingWatchdog(channel, attemptId)
+            }
+        }.also { player.addListener(it) }
+    }
+
     private fun startBufferingWatchdog(channel: Channel?, attemptId: Long) {
         if (channel == null) return
+        if (bufferingWatchdogJob?.isActive == true) return
         val timeoutMs = when (channel.currentSource?.type) {
             StreamType.HLS -> AppConfig.NATIVE_BUFFERING_TIMEOUT_MS
             StreamType.WEB_VIEW -> AppConfig.YOUTUBE_WEB_WATCH_TIMEOUT_MS
@@ -1564,13 +1723,15 @@ class MainActivity : AppCompatActivity() {
             delay(timeoutMs)
             if (currentAttemptId == attemptId) {
                 if (channel.currentSource?.type == StreamType.HLS &&
+                    loadingState.feedback(SystemClock.elapsedRealtime()) == null &&
                     playerManager.playerState.value == PlayerState.Playing) return@launch
                 val url = channel.currentSource?.url ?: ""
                 if (url.isNotBlank()) {
                     channel.currentSource?.let { failedSourceIds.add(it.sourceId) }
                     repository.recordSourceFailure(url, "緩衝逾時")
                 }
-                val timeoutMsg = getString(R.string.youtube_error_timeout)
+                val timeoutMsg = getString(if (channel.currentSource?.type == StreamType.YOUTUBE && !youtubeWebWatch)
+                    R.string.youtube_error_timeout else R.string.loading_source_timeout)
                 if (repository.isAutoFallbackEnabled()) {
                     triggerNextFallback(channel, attemptId, timeoutMsg)
                 } else {
@@ -1618,7 +1779,7 @@ class MainActivity : AppCompatActivity() {
         bufferingWatchdogJob?.cancel()
         ytStablePlaybackJob?.cancel()
         webWatchWatchdogJob?.cancel()
-        binding.layoutLoading.isVisible = false
+        finishLoading()
 
         repository.updateChannelHealth(
             channel.id,
@@ -1692,7 +1853,7 @@ class MainActivity : AppCompatActivity() {
         bufferingWatchdogJob?.cancel()
         ytStablePlaybackJob?.cancel()
         webWatchWatchdogJob?.cancel()
-        binding.layoutLoading.isVisible = false
+        finishLoading()
 
         repository.updateChannelHealth(
             channel.id,
@@ -1761,6 +1922,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun showSourceSelectionPanel() {
         val channel = currentPlayingChannel ?: return
+        dismissLoading()
         currentControlMode = TvControlMode.PANEL_OPEN
         binding.youtubePlayerView.setFocusIsolationEnabled(true)
         hideDrawer()
@@ -1795,6 +1957,9 @@ class MainActivity : AppCompatActivity() {
      * 進入官方網頁互動模式 (允許方向鍵與確認鍵操作官方播放器)
      */
     private fun enterWebInteraction() {
+        dismissLoading()
+        bufferingWatchdogJob?.cancel()
+        webWatchWatchdogJob?.cancel()
         currentControlMode = TvControlMode.WEB_INTERACTION
         binding.youtubePlayerView.setFocusIsolationEnabled(false)
         binding.youtubePlayerView.setWebInteractionEnabled(true)
@@ -1814,6 +1979,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDrawer() {
         if ((settingsBinding?.root?.isVisible == true) || binding.layoutSourceSelection.isVisible) return
+        dismissLoading()
 
         drawerDismissJob?.cancel()
         currentControlMode = TvControlMode.PANEL_OPEN
@@ -1955,6 +2121,11 @@ class MainActivity : AppCompatActivity() {
             return super.dispatchKeyEvent(event)
         }
 
+        if (binding.layoutLoading.hasFocus() && keyCode in listOf(
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER
+            )) return super.dispatchKeyEvent(event)
+
         // E. 核心換台鍵：最高特權！
         // 無論目前是正常播放、緩衝中、黑畫面、YouTube 錯誤 (150/地區限制) 還是 ExoPlayer 錯誤，
         // 只要抽屜/線路清單未開啟，按下上下鍵一律立刻切台！絕不被任何錯誤浮層或 WebView 阻擋！
@@ -2058,6 +2229,11 @@ class MainActivity : AppCompatActivity() {
             binding.layoutYoutubeError.isVisible = false
             binding.layoutError.isVisible = false
             updateControlModeAndFocusIsolationAfterPanelClose()
+            return true
+        }
+
+        if (binding.layoutLoading.isVisible) {
+            dismissLoading()
             return true
         }
 

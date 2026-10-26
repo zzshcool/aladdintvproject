@@ -35,6 +35,7 @@ class LampSplashView @JvmOverloads constructor(
     private var startUptime = 0L
     private var pausedUptime = 0L
 
+    private var loadingMode = false
     var onFinished: (() -> Unit)? = null
 
     private val lamp = arrayOf(
@@ -98,6 +99,38 @@ class LampSplashView @JvmOverloads constructor(
         Choreographer.getInstance().postFrameCallback(this)
     }
 
+    fun useAsLoadingIndicator() {
+        loadingMode = true
+        isClickable = false
+        isFocusable = false
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        setOnClickListener(null)
+        syncLoadingAnimation()
+    }
+
+    private fun syncLoadingAnimation() {
+        if (!loadingMode) return
+        if (!isShown || windowVisibility != VISIBLE) {
+            pauseAnimation()
+            return
+        }
+        if (isRunning) return
+        isRunning = true
+        startUptime = SystemClock.uptimeMillis()
+        Choreographer.getInstance().postFrameCallback(this)
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        syncLoadingAnimation()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        syncLoadingAnimation()
+    }
+
+
     fun finish() {
         if (finished) return
         finished = true
@@ -110,6 +143,12 @@ class LampSplashView @JvmOverloads constructor(
     override fun doFrame(frameTimeNanos: Long) {
         if (!isRunning || finished) return
         val elapsed = SystemClock.uptimeMillis() - startUptime
+        if (loadingMode) {
+            progress = .18f + ((elapsed % 1600L) / 1600f) * .42f
+            invalidate()
+            Choreographer.getInstance().postFrameCallback(this)
+            return
+        }
         val limit = if (isStaticLogoMode) STATIC_LOGO_DURATION_MS else DURATION_MS
         progress = if (isStaticLogoMode) 1f else (elapsed.toFloat() / limit).coerceIn(0f, 1f)
         invalidate()
@@ -132,8 +171,8 @@ class LampSplashView @JvmOverloads constructor(
         super.onDraw(canvas)
         if (width <= 0 || height <= 0) return
 
-        canvas.drawColor(Color.rgb(18, 20, 26))
-        val size = minOf(width / 112f, height / 76f)
+        if (!loadingMode) canvas.drawColor(Color.rgb(18, 20, 26))
+        val size = if (loadingMode) minOf(width / 42f, height / 56f) else minOf(width / 112f, height / 76f)
         canvas.save()
         canvas.translate(width / 2f, height / 2f)
         canvas.scale(size, size)
@@ -176,6 +215,10 @@ class LampSplashView @JvmOverloads constructor(
                 setBounds(-22, -25, 22, 19)
                 draw(canvas)
             }
+        }
+        if (loadingMode) {
+            canvas.restore()
+            return
         }
 
         // 應用程式名稱文字
