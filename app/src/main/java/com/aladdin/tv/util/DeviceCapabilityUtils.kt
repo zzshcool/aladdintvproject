@@ -45,12 +45,13 @@ object DeviceCapabilityUtils {
             val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
                 ?: return CapabilityResult(false, "無法取得視窗管理服務")
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val display = context.display ?: return CapabilityResult(false, "無有效顯示器資訊")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                @Suppress("DEPRECATION")
+                val display = windowManager.defaultDisplay
                 val currentMode = display.mode
                 // 優先檢測當前實際生效之顯示模式 (例如電視盒當前 HDMI 解析度)
-                if (currentMode.physicalWidth < 3840 && currentMode.physicalHeight < 2160) {
-                    val hasSupported4k = display.supportedModes.any { it.physicalWidth >= 3840 || it.physicalHeight >= 2160 }
+                if (maxOf(currentMode.physicalWidth, currentMode.physicalHeight) < 3840 || minOf(currentMode.physicalWidth, currentMode.physicalHeight) < 2160) {
+                    val hasSupported4k = display.supportedModes.any { maxOf(it.physicalWidth, it.physicalHeight) >= 3840 && minOf(it.physicalWidth, it.physicalHeight) >= 2160 }
                     val note = if (hasSupported4k) "面板支援 4K，但目前 HDMI/系統實際輸出為 ${currentMode.physicalWidth}x${currentMode.physicalHeight}" else "顯示器硬體未達 4K"
                     return CapabilityResult(false, note)
                 }
@@ -59,7 +60,7 @@ object DeviceCapabilityUtils {
                 val metrics = DisplayMetrics()
                 @Suppress("DEPRECATION")
                 windowManager.defaultDisplay.getRealMetrics(metrics)
-                if (metrics.widthPixels >= 3840 || metrics.heightPixels >= 2160) {
+                if (maxOf(metrics.widthPixels, metrics.heightPixels) >= 3840 && minOf(metrics.widthPixels, metrics.heightPixels) >= 2160) {
                     CapabilityResult(true, "目前螢幕輸出為 4K")
                 } else {
                     CapabilityResult(false, "目前輸出解析度為 ${metrics.widthPixels}x${metrics.heightPixels} (未達 4K)")
@@ -101,6 +102,10 @@ object DeviceCapabilityUtils {
                     continue
                 }
 
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    val name = info.name.lowercase(java.util.Locale.ROOT)
+                    if (name.startsWith("omx.google.") || name.startsWith("c2.android.") || name.contains(".sw.")) continue
+                }
                 try {
                     val caps = info.getCapabilitiesForType(mimeType)
                     val videoCaps = caps.videoCapabilities ?: continue

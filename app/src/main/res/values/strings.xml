@@ -137,4 +137,5 @@
     <string name="loading_channel">CH %1$02d · %2$s</string>
     <string name="loading_resolution_timeout">尋找直播逾時，請重試或選擇其他線路</string>
     <string name="loading_source_timeout">目前線路載入逾時，請重試或選擇其他線路</string>
+    <string name="web_renderer_error">網頁播放器已重建，請重試目前線路</string>
 </resources>

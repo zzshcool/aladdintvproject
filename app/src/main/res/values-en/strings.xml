@@ -129,4 +129,5 @@
     <string name="splash_animation_off">Splash Animation: OFF (Direct Logo)</string>
     <string name="splash_animation_toast_on">Splash animation enabled (Lamp Animation)</string>
     <string name="splash_animation_toast_off">Direct Logo mode enabled (No Animation)</string>
+    <string name="web_renderer_error">Web player recovered. Please retry the current source.</string>
 </resources>

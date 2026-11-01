@@ -177,6 +177,14 @@
                 android:textSize="12sp"
                 android:textStyle="bold" />
 
+            <Button
+                android:id="@+id/btnVideoScale"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_channel_focus"
+                android:textColor="@color/tv_text_primary"
+                android:text="@string/touch_fill" />
+
             <!-- 2. 畫質上限偏好區 -->
             <TextView
                 android:layout_width="wrap_content"

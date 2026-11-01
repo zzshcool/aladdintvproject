@@ -413,8 +413,7 @@ class MainActivity : AppCompatActivity() {
             binding.layoutTouchControls.isVisible = !binding.layoutTouchControls.isVisible
             scheduleTouchControlsDismiss()
         }
-        fillScreen = binding.btnTouchMenu.isVisible &&
-            getPreferences(MODE_PRIVATE).getBoolean("mobile_fill_screen", false)
+        fillScreen = getPreferences(MODE_PRIVATE).getBoolean("mobile_fill_screen", false)
         applyVideoScale()
         binding.btnTouchFill.setOnClickListener {
             fillScreen = !fillScreen
@@ -981,6 +980,13 @@ class MainActivity : AppCompatActivity() {
         settings.btnThemeLight.setOnClickListener { updateTheme(AppConfig.THEME_LIGHT) }
 
         // 畫質上限切換
+        settings.btnVideoScale.setText(if (fillScreen) R.string.touch_fit else R.string.touch_fill)
+        settings.btnVideoScale.setOnClickListener {
+            fillScreen = !fillScreen
+            getPreferences(MODE_PRIVATE).edit().putBoolean("mobile_fill_screen", fillScreen).apply()
+            applyVideoScale()
+            settings.btnVideoScale.setText(if (fillScreen) R.string.touch_fit else R.string.touch_fill)
+        }
         settings.btnQualityAuto.setOnClickListener { updateQualityPref(AppConfig.QUALITY_AUTO) }
         settings.btnQuality1080p.setOnClickListener { updateQualityPref(AppConfig.QUALITY_1080P) }
         settings.btnQuality4k.setOnClickListener { updateQualityPref(AppConfig.QUALITY_4K) }
@@ -1625,6 +1631,7 @@ class MainActivity : AppCompatActivity() {
             !binding.layoutError.isVisible && !binding.layoutYoutubeError.isVisible &&
             !binding.layoutDrawer.isVisible && !binding.layoutSourceSelection.isVisible &&
             settingsBinding?.root?.isVisible != true && currentControlMode != TvControlMode.WEB_INTERACTION
+        val newlyVisible = !binding.layoutLoading.isVisible
         val hadFocus = binding.layoutLoading.hasFocus()
         binding.layoutLoading.isVisible = visible
         if (!visible) {
@@ -1640,6 +1647,9 @@ class MainActivity : AppCompatActivity() {
         })
         if (binding.tvLoadingText.text.toString() != message) binding.tvLoadingText.text = message
         binding.loadingActions.isVisible = feedback?.slow == true
+        if (newlyVisible && !packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)) {
+            binding.btnLoadingDismiss.requestFocus()
+        }
         binding.btnLoadingWeb.isVisible = binding.youtubePlayerView.isVisible &&
             (youtubeWebWatch || currentPlayingChannel?.currentSource?.type == StreamType.WEB_VIEW)
     }
@@ -2279,6 +2289,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                val play = when (keyCode) {
+                    KeyEvent.KEYCODE_MEDIA_PLAY -> true
+                    KeyEvent.KEYCODE_MEDIA_PAUSE -> false
+                    else -> if (binding.youtubePlayerView.isVisible)
+                        !binding.youtubePlayerView.isPlaybackRequested()
+                    else !playerManager.isPlaybackRequested()
+                }
+                if (binding.youtubePlayerView.isVisible) {
+                    if (play) binding.youtubePlayerView.resumeVideo() else binding.youtubePlayerView.pauseVideo()
+                } else playerManager.setPlayWhenReady(play)
+                return true
+            }
             // 切換上一台
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
                 playPreviousChannel()

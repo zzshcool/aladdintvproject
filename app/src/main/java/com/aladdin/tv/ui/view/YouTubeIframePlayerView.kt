@@ -205,6 +205,23 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
             }
 
             webViewClient = object : WebViewClient() {
+                @androidx.annotation.RequiresApi(android.os.Build.VERSION_CODES.O)
+                override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
+                    val attempt = activeAttempt
+                    clearCustomFullscreen()
+                    webView = null
+                    if (view != null) {
+                        removeView(view)
+                        view.destroy()
+                    }
+                    setupWebView()
+                    if (attempt != null) {
+                        listener?.onError(attempt.attemptId, attempt.channelId, attempt.sourceId,
+                            attempt.playMode, -1003, "WebView renderer exited", context.getString(com.aladdin.tv.R.string.web_renderer_error))
+                    }
+                    return true
+                }
+
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url?.toString() ?: return true
                     val host = request.url?.host
@@ -730,6 +747,8 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
             wv.loadUrl("about:blank")
         }
     }
+
+    fun isPlaybackRequested(): Boolean = playbackAllowed
 
     fun pauseVideo() {
         playbackAllowed = false

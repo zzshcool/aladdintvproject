@@ -431,6 +431,8 @@ class AladdinPlayerManager(
         }
     }
 
+    fun isPlaybackRequested(): Boolean = exoPlayer?.playWhenReady == true
+
     fun setPlayWhenReady(playWhenReady: Boolean) {
         playbackAllowed = playWhenReady
         if (!playWhenReady) {
