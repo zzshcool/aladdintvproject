@@ -111,6 +111,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
 
     fun setWebInteractionEnabled(enabled: Boolean) {
         this.isWebInteractionEnabled = enabled
+        webView?.evaluateJavascript("window.aladdinWebInteraction = $enabled; window.aladdinApplyWatchLayout?.();", null)
         descendantFocusability = if (enabled) {
             android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
         } else {
@@ -326,6 +327,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
         currentNavAttemptId = attemptId
         injectedAttemptId = 0L
 
+        webView?.settings?.userAgentString = DEFAULT_UA
         val html = buildIFrameHtml(attempt, videoId)
         Log.d(TAG, "loadIFrame: attemptId=$attemptId channelId=$channelId sourceId=$sourceId vid=$videoId")
         webView?.loadDataWithBaseURL(APP_ORIGIN, html, "text/html", "UTF-8", null)
@@ -347,6 +349,9 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
         injectedAttemptId = 0L
 
         Log.d(TAG, "loadWebWatch: attemptId=$attemptId channelId=$channelId sourceId=$sourceId url=$targetUrl")
+        val host = android.net.Uri.parse(targetUrl).host.orEmpty()
+        webView?.settings?.userAgentString = if (host == "4gtv.tv" || host.endsWith(".4gtv.tv"))
+            WebSettings.getDefaultUserAgent(context) else DEFAULT_UA
         webView?.loadUrl(targetUrl)
     }
 
@@ -378,6 +383,8 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                 let lastConfirmation = 0;
                 let stalledSamples = 0;
                 let stalled = false;
+                let manualPrompted = false;
+                let playerWaitStarted = Date.now();
 
                 function playbackDocuments() {
                     const docs = [document];
@@ -493,7 +500,7 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     if (!monitorEnabled) return;
                     if (progressTimer) clearInterval(progressTimer);
                     advanceCount = 0;
-                    if (location.hostname.endsWith('ofiii.com') || location.hostname === 'www.4gtv.tv' || location.hostname === '4gtv.tv') {
+                    if (location.hostname.endsWith('ofiii.com') || location.hostname === '4gtv.tv' || location.hostname.endsWith('.4gtv.tv')) {
                         const adTransition = isAdPlaying() || !isLiveConfirmed(currentVideo);
                         cleanupListeners();
                         if (!adTransition) AndroidBridge.onStateChange(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, 3, 0);
@@ -543,7 +550,14 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                     const youtube = host === 'youtube.com' || host.endsWith('.youtube.com');
                     const fourgtv = host === '4gtv.tv' || host.endsWith('.4gtv.tv');
                     if (!ofiii && !youtube && !fourgtv) return;
-                    const root = fourgtv ? document.querySelector('#videoPlay') : ofiii
+                    if (window.aladdinWebInteraction) {
+                        document.getElementById('aladdin-watch-layout')?.remove();
+                        document.querySelectorAll('[data-aladdin-watch-player]').forEach(e => e.removeAttribute('data-aladdin-watch-player'));
+                        return;
+                    }
+                    const fourVideo = fourgtv ? document.querySelector('#videoPlay video, video#videoPlay') : null;
+                    if (fourgtv && (!fourVideo || !fourVideo.currentSrc || fourVideo.readyState < 1)) return;
+                    const root = fourgtv ? (fourVideo.closest('.video-js, .jwplayer, .bitmovinplayer-container') || fourVideo.parentElement) : ofiii
                         ? document.querySelector('.player_section, .player_fixed_section iframe[src*="/player"]')
                         : document.querySelector('video.html5-main-video')?.closest('#player-container-outer, #player-container-id, ytm-player, ytd-player, #movie_player') ||
                           document.querySelector('#player-container-outer, #player-container-id, ytm-player, ytd-player, #movie_player');
@@ -609,6 +623,16 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
                             startProgress(candidate);
                         }
                         return true;
+                    }
+                    if (!manualPrompted) {
+                        const entry = document.querySelector('.player_section .play_icon, .vjs-big-play-button, .jw-icon-display, .bmpui-ui-hugeplaybacktogglebutton');
+                        if (entry && entry.getBoundingClientRect().width > 0) {
+                            manualPrompted = true;
+                            AndroidBridge.onAutoplayBlocked(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE);
+                        } else if ((location.hostname === '4gtv.tv' || location.hostname.endsWith('.4gtv.tv')) && Date.now() - playerWaitStarted > 12000 && !document.querySelector('.video-js')) {
+                            manualPrompted = true;
+                            AndroidBridge.onError(ATTEMPT_ID, CHANNEL_ID, SOURCE_ID, PLAY_MODE, -1004, 'Official player initialization requires interaction');
+                        }
                     }
                     return false;
                 }
@@ -711,16 +735,42 @@ class YouTubeIframePlayerView @JvmOverloads constructor(
      */
     fun triggerManualPlay() {
         if (!playbackAllowed) return
-        sendPlaybackCommand("play")
-        if (activeAttempt?.playMode == PlayMode.WEB_WATCH) {
-            webView?.evaluateJavascript(
-                """
-                (function() {
-                    const entry = document.querySelector('.player_section .play_icon');
-                    if (entry && !window.aladdinPlaybackVideo) entry.parentElement.click();
-                })();
-                """.trimIndent(), null
-            )
+        val attempt = activeAttempt ?: return
+        if (attempt.playMode != PlayMode.WEB_WATCH) {
+            sendPlaybackCommand("play")
+            return
+        }
+        webView?.evaluateJavascript(
+            """
+            (function() {
+                const entry = document.querySelector('.player_section .play_icon, .vjs-big-play-button, .jw-icon-display, .bmpui-ui-hugeplaybacktogglebutton');
+                if (!entry) return null;
+                const rect = entry.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) return null;
+                return { x: (rect.left + rect.width / 2) / innerWidth, y: (rect.top + rect.height / 2) / innerHeight };
+            })();
+            """.trimIndent()
+        ) { result ->
+            if (activeAttempt?.attemptId != attempt.attemptId || !playbackAllowed) return@evaluateJavascript
+            val view = webView ?: return@evaluateJavascript
+            val position = try { org.json.JSONObject(result) } catch (_: Exception) { null }
+            if (position == null) {
+                sendPlaybackCommand("play")
+                return@evaluateJavascript
+            }
+            val x = position.optDouble("x", -1.0)
+            val y = position.optDouble("y", -1.0)
+            if (x !in 0.0..1.0 || y !in 0.0..1.0) return@evaluateJavascript
+            // Forward the user's explicit OK/play action to the official player's visible start control.
+            val now = android.os.SystemClock.uptimeMillis()
+            fun dispatch(action: Int) {
+                if (activeAttempt?.attemptId != attempt.attemptId || !playbackAllowed) return
+                val event = android.view.MotionEvent.obtain(now, android.os.SystemClock.uptimeMillis(), action, (x * view.width).toFloat(), (y * view.height).toFloat(), 0)
+                event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+            }
+            dispatch(android.view.MotionEvent.ACTION_DOWN)
+            view.postDelayed({ dispatch(android.view.MotionEvent.ACTION_UP) }, 50L)
         }
     }
 

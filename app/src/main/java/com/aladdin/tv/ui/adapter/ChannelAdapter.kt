@@ -144,7 +144,9 @@ class ChannelAdapter(
             } else {
                 context.getString(textRes)
             }
-            binding.tvStatusText.text = displayText
+            binding.tvStatusText.text = if (health.status == ChannelHealthStatus.NORMAL)
+                context.getString(R.string.health_recent, java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(health.lastUpdatedTime)))
+            else displayText
             binding.tvStatusText.setTextColor(color)
         }
     }

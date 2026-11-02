@@ -138,4 +138,16 @@
     <string name="loading_resolution_timeout">尋找直播逾時，請重試或選擇其他線路</string>
     <string name="loading_source_timeout">目前線路載入逾時，請重試或選擇其他線路</string>
     <string name="web_renderer_error">網頁播放器已重建，請重試目前線路</string>
+    <string name="tools_help">操作說明</string>
+    <string name="tools_export">匯出個人設定</string>
+    <string name="tools_import">匯入個人設定</string>
+    <string name="tools_diagnostics">分享診斷資訊</string>
+    <string name="tools_update">版本與更新</string>
+    <string name="tools_done">設定已處理</string>
+    <string name="tools_failed">操作失敗，請確認檔案格式及儲存位置</string>
+    <string name="tools_guide">上下：換台\n確認／左：頻道清單\n右：選擇線路\n選單：開關頻道清單\n返回：關閉面板；收視時連按兩次離開\n播放／暫停：控制目前線路\n網頁互動模式按返回可恢復電視控制</string>
+    <string name="health_recent">最近成功 %1$s</string>
+    <string name="tools_import_confirm">匯入會取代收藏、隱藏頻道與偏好設定，是否繼續？</string>
+    <string name="official_page_interaction">官方播放器未完成載入，可能需要網站驗證或手動操作，請開啟官方網頁確認。</string>
+    <string name="official_page_open">操作官方網頁</string>
 </resources>

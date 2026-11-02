@@ -269,6 +269,69 @@ class ChannelRepository private constructor(context: Context) {
         prefs.edit().remove(youTubeResolutionPreferenceKey(handle.trim())).apply()
     }
 
+    private fun isPortablePreference(key: String): Boolean = key in setOf(
+        "favorite_channels", "manually_hidden_channels", "hidden_channel_archive", "restored_channels",
+        "accent_color", AppConfig.PREF_APP_THEME, AppConfig.PREF_QUALITY_PREF,
+        AppConfig.PREF_APP_LANGUAGE, AppConfig.PREF_SPLASH_ANIMATION_ENABLED,
+        AppConfig.PREF_AUTO_FALLBACK_ENABLED
+    ) || key.startsWith(AppConfig.PREF_USER_SELECTED_SOURCE_PREFIX)
+
+    fun exportPreferences(): String {
+        val values = JSONObject()
+        prefs.all.filterKeys(::isPortablePreference).forEach { (key, value) ->
+            values.put(key, if (value is Set<*>) JSONArray(value.toList()) else value)
+        }
+        return JSONObject().put("format", "aladdin-preferences").put("version", 1).put("values", values).toString(2)
+    }
+
+    fun importPreferences(text: String) {
+        require(text.length <= 1_000_000)
+        val document = JSONObject(text)
+        require(document.getString("format") == "aladdin-preferences" && document.getInt("version") == 1)
+        val values = document.getJSONObject("values")
+        val sets = setOf("favorite_channels", "manually_hidden_channels", "restored_channels")
+        val booleans = setOf(AppConfig.PREF_SPLASH_ANIMATION_ENABLED, AppConfig.PREF_AUTO_FALLBACK_ENABLED)
+        val integers = setOf(AppConfig.PREF_APP_THEME, AppConfig.PREF_QUALITY_PREF)
+        val parsed = values.keys().asSequence().associateWith { key ->
+            require(isPortablePreference(key))
+            val value = values.get(key)
+            when (key) {
+                in sets -> { require(value is JSONArray); (0 until value.length()).map { value.getString(it) }.toSet() }
+                in booleans -> { require(value is Boolean); value }
+                in integers -> { require(value is Int && value in 0..2); value }
+                else -> {
+                    require(value is String)
+                    if (key == "hidden_channel_archive") {
+                        val archive = JSONArray(value)
+                        for (index in 0 until archive.length()) Channel.fromJson(archive.getJSONObject(index))
+                    }
+                    if (key == "accent_color") require(AccentColor.entries.any { it.name == value })
+                    if (key == AppConfig.PREF_APP_LANGUAGE) require(value in setOf(AppConfig.LANGUAGE_SYSTEM, AppConfig.LANGUAGE_ZH_TW, AppConfig.LANGUAGE_EN))
+                    value
+                }
+            }
+        }
+        val editor = prefs.edit()
+        prefs.all.keys.filter(::isPortablePreference).forEach(editor::remove)
+        parsed.forEach { (key, value) ->
+            when (value) {
+                is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is String -> editor.putString(key, value)
+            }
+        }
+        check(editor.commit())
+        synchronized(this) {
+            val archive = JSONArray(prefs.getString("hidden_channel_archive", "[]"))
+            val restored = (0 until archive.length()).map { Channel.fromJson(archive.getJSONObject(it)) }
+            val merged = applyUserSelectedSources(mergeAndDeduplicate(getBuiltInSeedChannels(), _channels.value, restored))
+            _channels.value = merged
+            initHealthStatuses(merged)
+            saveToCache(merged)
+        }
+    }
+
     fun isFavorite(channel: Channel) = prefs.getStringSet("favorite_channels", emptySet())!!.contains(channel.canonicalId)
 
     fun toggleFavorite(channel: Channel) {

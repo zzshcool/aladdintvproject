@@ -130,4 +130,24 @@
     <string name="splash_animation_toast_on">Splash animation enabled (Lamp Animation)</string>
     <string name="splash_animation_toast_off">Direct Logo mode enabled (No Animation)</string>
     <string name="web_renderer_error">Web player recovered. Please retry the current source.</string>
+    <string name="loading_connecting">Connecting…</string>
+    <string name="loading_resolving">Finding YouTube live stream…</string>
+    <string name="loading_buffering">Buffering…</string>
+    <string name="loading_slow">Connection is slow. Retry or choose another source.</string>
+    <string name="loading_dismiss">Dismiss</string>
+    <string name="loading_channel">CH %1$02d · %2$s</string>
+    <string name="loading_resolution_timeout">Finding the live stream timed out. Retry or choose another source.</string>
+    <string name="loading_source_timeout">Source timed out. Retry or choose another source.</string>
+    <string name="tools_help">Remote control guide</string>
+    <string name="tools_export">Export preferences</string>
+    <string name="tools_import">Import preferences</string>
+    <string name="tools_diagnostics">Share diagnostics</string>
+    <string name="tools_update">Version and updates</string>
+    <string name="tools_done">Preferences saved</string>
+    <string name="tools_failed">Operation failed. Check the file and storage location.</string>
+    <string name="tools_guide">Up/down: change channel\nOK/left: channel list\nRight: sources\nMenu: toggle channel list\nBack: close panel; press twice during viewing to exit\nPlay/pause: current source\nBack exits web interaction mode</string>
+    <string name="health_recent">Last played %1$s</string>
+    <string name="tools_import_confirm">Import replaces favorites, hidden channels and preferences. Continue?</string>
+    <string name="official_page_interaction">The official player did not initialize. Open the official page to check verification or required interaction.</string>
+    <string name="official_page_open">Use official page</string>
 </resources>

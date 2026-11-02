@@ -55,6 +55,30 @@ class MainActivity : AppCompatActivity() {
         FULLSCREEN        // 網頁全螢幕模式
     }
 
+    private var userPaused = false
+    private var backgroundAt = 0L
+    private var networkWasLost = false
+    private var networkRecoveryJob: Job? = null
+    private val networkReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            val manager = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            @Suppress("DEPRECATION")
+            val connected = manager.activeNetworkInfo?.isConnected == true
+            if (!connected) networkWasLost = true
+            else if (networkWasLost) {
+                networkWasLost = false
+                networkRecoveryJob?.cancel()
+                val attempt = currentAttemptId
+                networkRecoveryJob = lifecycleScope.launch {
+                    delay(1500)
+                    if (isForeground && splashComplete && !userPaused && attempt == currentAttemptId) {
+                        currentPlayingChannel?.let { playChannelStream(it, it.currentSourceIndex, false) }
+                    }
+                }
+            }
+        }
+    }
+
     private var settingsBinding: PanelSettingsBinding? = null
     private val settings: PanelSettingsBinding get() = checkNotNull(settingsBinding)
     private lateinit var binding: ActivityMainBinding
@@ -179,6 +203,13 @@ class MainActivity : AppCompatActivity() {
         }
         binding.rootContainer.post { applyResponsiveLayout(binding.rootContainer.width) }
         initYouTubePlayer()
+        androidx.core.content.ContextCompat.registerReceiver(this, networkReceiver,
+            android.content.IntentFilter(android.net.ConnectivityManager.CONNECTIVITY_ACTION),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        if (!getPreferences(MODE_PRIVATE).getBoolean("guide_seen", false)) {
+            getPreferences(MODE_PRIVATE).edit().putBoolean("guide_seen", true).apply()
+            binding.rootContainer.post { showControlGuide() }
+        }
         binding.btnFavoriteList.setOnClickListener { showSavedChannels(false) }
         binding.btnRecentChannels.setOnClickListener { showSavedChannels(true) }
         initGestureDetector()
@@ -189,6 +220,48 @@ class MainActivity : AppCompatActivity() {
             repository.loadChannels()
         }
         if (savedInstanceState?.getBoolean("settings_open") == true) showSettingsPanel()
+    }
+
+    private fun showControlGuide() {
+        AlertDialog.Builder(this).setTitle(R.string.tools_help).setMessage(R.string.tools_guide)
+            .setPositiveButton(android.R.string.ok, null).show()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun launchDocument(intent: android.content.Intent, request: Int) {
+        try { startActivityForResult(intent, request) }
+        catch (_: android.content.ActivityNotFoundException) { Toast.makeText(this, R.string.tools_failed, Toast.LENGTH_SHORT).show() }
+    }
+
+    @Deprecated("Activity result compatibility for API 21")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode !in setOf(401, 402) || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        lifecycleScope.launch {
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    if (requestCode == 401) {
+                        checkNotNull(contentResolver.openOutputStream(uri, "wt")).bufferedWriter().use { it.write(repository.exportPreferences()) }
+                    } else {
+                        val text = checkNotNull(contentResolver.openInputStream(uri)).bufferedReader().use { reader ->
+                            val buffer = CharArray(1_000_001)
+                            var size = 0
+                            while (size < buffer.size) {
+                                val count = reader.read(buffer, size, buffer.size - size)
+                                if (count < 0) break
+                                size += count
+                            }
+                            require(size <= 1_000_000)
+                            String(buffer, 0, size)
+                        }
+                        repository.importPreferences(text)
+                    }
+                }
+                Toast.makeText(this@MainActivity, R.string.tools_done, Toast.LENGTH_SHORT).show()
+                if (requestCode == 402) recreate()
+            } catch (_: Exception) { Toast.makeText(this@MainActivity, R.string.tools_failed, Toast.LENGTH_LONG).show() }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -206,16 +279,24 @@ class MainActivity : AppCompatActivity() {
             binding.lampSplash.resumeAnimation()
             return
         }
-        binding.youtubePlayerView.resumeVideo()
+        if (!userPaused && backgroundAt > 0L && SystemClock.elapsedRealtime() - backgroundAt >= 60_000L) {
+            currentPlayingChannel?.let { channel ->
+                backgroundAt = 0L
+                channel.currentSource?.liveChannelHandle?.let { repository.invalidateYouTubeResolution(it, channel.canonicalId) }
+                playChannelStream(channel, channel.currentSourceIndex, false, refreshingLiveId = true)
+                return
+            }
+        }
+        if (!userPaused) binding.youtubePlayerView.resumeVideo()
         SystemUiUtils.hideSystemBars(window)
-        playerManager.setPlayWhenReady(currentPlayingChannel?.currentSource?.type == StreamType.HLS || currentPlayingChannel == null)
+        playerManager.setPlayWhenReady(!userPaused && (currentPlayingChannel?.currentSource?.type == StreamType.HLS || currentPlayingChannel == null))
         pendingPlayback?.let { pending ->
             pendingPlayback = null
             pending()
             return
         }
         val channel = currentPlayingChannel
-        if (channel != null) {
+        if (channel != null && !userPaused) {
             if (loadingState.feedback(SystemClock.elapsedRealtime()) != null) {
                 beginLoading(channel, currentAttemptId, youtubeResolveJob?.isActive == true)
             }
@@ -228,6 +309,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         isForeground = false
+        backgroundAt = SystemClock.elapsedRealtime()
         loadingFeedbackJob?.cancel()
         binding.layoutLoading.isVisible = false
         binding.lampSplash.pauseAnimation()
@@ -253,6 +335,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        networkRecoveryJob?.cancel()
+        unregisterReceiver(networkReceiver)
         loadingFeedbackJob?.cancel()
         clearNativeLoadingListener()
         pendingPlayback = null
@@ -366,7 +450,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         playerManager.onExoPlayerSourceFailed = { channel, sourceIndex, sessionToken, reason ->
-            if (isForeground && sessionToken == currentSessionToken) {
+            if (isForeground && !userPaused && sessionToken == currentSessionToken) {
                 val failedUrl = channel.streamSources.getOrNull(sourceIndex)?.url ?: ""
                 channel.streamSources.getOrNull(sourceIndex)?.let { failedSourceIds.add(it.sourceId) }
                 repository.recordSourceFailure(failedUrl, reason)
@@ -526,7 +610,7 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 if (loadingState.finished) return
                 if (!webAdPlaying && confirmedWebAttemptId != attemptId && bufferingWatchdogJob?.isActive != true) {
                     startBufferingWatchdog(currentPlayingChannel, attemptId)
@@ -543,7 +627,7 @@ class MainActivity : AppCompatActivity() {
                 currentTimeSeconds: Double,
                 isLiveConfirmed: Boolean
             ) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 if (loadingState.finished) return
                 val channel = currentPlayingChannel ?: return
                 completeLoading(attemptId)
@@ -604,7 +688,7 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 if (loadingState.finished || webAdPlaying) return
                 val channel = currentPlayingChannel ?: return
                 confirmedWebAttemptId = -1L
@@ -627,7 +711,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPaused(attemptId: Long, channelId: String, sourceId: String, playMode: YouTubeIframePlayerView.PlayMode) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 confirmedWebAttemptId = -1L
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
@@ -644,7 +728,7 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 val channel = currentPlayingChannel ?: return
                 ytStablePlaybackJob?.cancel()
                 webWatchWatchdogJob?.cancel()
@@ -659,7 +743,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onAdStateChanged(attemptId: Long, channelId: String, sourceId: String, isAdPlaying: Boolean) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 if (loadingState.finished) return
                 if (webAdAttemptId == attemptId && webAdPlaying == isAdPlaying) return
                 webAdAttemptId = attemptId
@@ -690,7 +774,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onLoginRequired(attemptId: Long, channelId: String, sourceId: String) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 val channel = currentPlayingChannel ?: return
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
@@ -704,7 +788,7 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 rawReason: String
             ) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 bufferingWatchdogJob?.cancel()
                 ytStablePlaybackJob?.cancel()
                 webWatchWatchdogJob?.cancel()
@@ -732,13 +816,18 @@ class MainActivity : AppCompatActivity() {
                 rawReason: String,
                 description: String
             ) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 bufferingWatchdogJob?.cancel()
                 ytStablePlaybackJob?.cancel()
                 webWatchWatchdogJob?.cancel()
                 finishLoading()
 
                 val channel = currentPlayingChannel ?: return
+                if (errorCode == -1004) {
+                    showManualPlaybackError(channel, getString(R.string.official_page_interaction), allowWebWatch = true)
+                    binding.btnYoutubeWebWatch.setText(R.string.official_page_open)
+                    return
+                }
                 val failedUrl = channel.currentSource?.url ?: ""
 
                 lastDiagRawErrorCode = "$errorCode ($rawReason)"
@@ -788,7 +877,7 @@ class MainActivity : AppCompatActivity() {
                 sourceId: String,
                 playMode: YouTubeIframePlayerView.PlayMode
             ) {
-                if (!isForeground || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
+                if (!isForeground || userPaused || attemptId != currentAttemptId || channelId != currentPlayingChannel?.id) return
                 bufferingWatchdogJob?.cancel()
                 webWatchWatchdogJob?.cancel()
                 finishLoading()
@@ -808,6 +897,7 @@ class MainActivity : AppCompatActivity() {
                     beginLoading(ch, currentAttemptId)
                     startBufferingWatchdog(ch, currentAttemptId)
                 }
+                binding.youtubePlayerView.resumeVideo()
                 binding.youtubePlayerView.triggerManualPlay()
             } else {
                 currentPlayingChannel?.let { ch ->
@@ -824,6 +914,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnYoutubeWebWatch.setOnClickListener {
             binding.layoutYoutubeError.isVisible = false
+            if (currentPlayingChannel?.currentSource?.type == StreamType.WEB_VIEW) {
+                enterWebInteraction()
+                return@setOnClickListener
+            }
             currentPlayingChannel?.let { ch ->
                 val src = ch.currentSource
                 val vid = currentYouTubeWatchTarget()
@@ -849,6 +943,43 @@ class MainActivity : AppCompatActivity() {
      * 初始化設定面板控制項與按鈕監聽
      */
     private fun initSettingsPanel() {
+        settings.btnToolsGuide.setOnClickListener { showControlGuide() }
+        settings.btnToolsExport.setOnClickListener {
+            launchDocument(android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("application/json")
+                .putExtra(android.content.Intent.EXTRA_TITLE, "aladdin-preferences.json"), 401)
+        }
+        settings.btnToolsImport.setOnClickListener {
+            AlertDialog.Builder(this).setMessage(R.string.tools_import_confirm)
+                .setPositiveButton(android.R.string.ok) { _, _ ->
+                    launchDocument(android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
+                        .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("application/json"), 402)
+                }.setNegativeButton(android.R.string.cancel, null).show()
+        }
+        settings.btnToolsDiagnostics.setOnClickListener {
+            refreshPlaybackDiagnostics()
+            val info = packageManager.getPackageInfo(packageName, 0)
+            val webVersion = if (android.os.Build.VERSION.SDK_INT >= 26)
+                android.webkit.WebView.getCurrentWebViewPackage()?.versionName ?: "unknown" else "system"
+            val summary = "Aladdin TV ${info.versionName}\nAndroid ${android.os.Build.VERSION.RELEASE} / ${android.os.Build.MODEL}\nWebView $webVersion\n" +
+                listOf(settings.tvDiagChannel, settings.tvDiagMode, settings.tvDiagQualityStrategy).joinToString("\n") { it.text } +
+                "\n${currentPlayingChannel?.currentSource?.type} / ${lastDiagVerificationTime}"
+            (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                .setPrimaryClip(android.content.ClipData.newPlainText("Aladdin diagnostics", summary))
+            try { startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+                .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, summary), getString(R.string.tools_diagnostics))) }
+            catch (_: android.content.ActivityNotFoundException) { Toast.makeText(this, R.string.tools_done, Toast.LENGTH_SHORT).show() }
+        }
+        settings.btnToolsUpdate.setOnClickListener {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            AlertDialog.Builder(this).setTitle("Aladdin TV ${info.versionName}")
+                .setMessage("GitHub Releases")
+                .setPositiveButton(R.string.tools_update) { _, _ ->
+                    try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("https://github.com/zzshcool/aladdintvproject/releases"))) }
+                    catch (_: android.content.ActivityNotFoundException) { Toast.makeText(this, R.string.tools_failed, Toast.LENGTH_SHORT).show() }
+                }.setNegativeButton(android.R.string.cancel, null).show()
+        }
         settings.btnPrivacyPolicy.setOnClickListener {
             val url = getString(R.string.privacy_policy_url)
             try {
@@ -993,12 +1124,17 @@ class MainActivity : AppCompatActivity() {
 
         // 頻道來源手動更新
         settings.btnRefreshChannels.setOnClickListener {
+            settings.btnRefreshChannels.isEnabled = false
             Toast.makeText(this, getString(R.string.refreshing_channels), Toast.LENGTH_SHORT).show()
             lifecycleScope.launch {
-                val isSuccess = repository.fetchAndRefreshFromRemote()
-                refreshSettingsSourceInfo()
-                val msg = if (isSuccess) getString(R.string.source_status_success) else getString(R.string.source_status_fallback)
-                Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                try {
+                    val isSuccess = repository.fetchAndRefreshFromRemote()
+                    refreshSettingsSourceInfo()
+                    val msg = if (isSuccess) getString(R.string.source_status_success) else getString(R.string.source_status_fallback)
+                    Toast.makeText(this@MainActivity, msg, Toast.LENGTH_SHORT).show()
+                } finally {
+                    settingsBinding?.btnRefreshChannels?.isEnabled = true
+                }
             }
         }
 
@@ -1221,7 +1357,7 @@ class MainActivity : AppCompatActivity() {
             var lastPosition: Long? = null
             while (true) {
                 delay(5000)
-                if (!isForeground) { lastPosition = null; continue }
+                if (!isForeground || userPaused) { lastPosition = null; continue }
                 val channel = currentPlayingChannel
                 if (sampledAttempt != currentAttemptId) {
                     sampledAttempt = currentAttemptId
@@ -1414,6 +1550,7 @@ class MainActivity : AppCompatActivity() {
         ytStablePlaybackJob?.cancel()
         webWatchWatchdogJob?.cancel()
 
+        userPaused = false
         val activeChannel = channel.withSourceIndex(sourceIndex)
         adWatchdogJob?.cancel()
         currentPlayingChannel = activeChannel
@@ -1711,7 +1848,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (!isForeground || !isCurrent() || playbackState != Player.STATE_BUFFERING) return
+                if (!isForeground || userPaused || !isCurrent() || playbackState != Player.STATE_BUFFERING) return
                 if (loadingState.finished) beginLoading(channel, attemptId)
                 showBufferingFeedback(attemptId)
                 binding.layoutError.isVisible = false
@@ -1721,7 +1858,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startBufferingWatchdog(channel: Channel?, attemptId: Long) {
-        if (channel == null) return
+        if (channel == null || userPaused) return
         if (bufferingWatchdogJob?.isActive == true) return
         val timeoutMs = when (channel.currentSource?.type) {
             StreamType.HLS -> AppConfig.NATIVE_BUFFERING_TIMEOUT_MS
@@ -1731,7 +1868,7 @@ class MainActivity : AppCompatActivity() {
         bufferingWatchdogJob?.cancel()
         bufferingWatchdogJob = lifecycleScope.launch {
             delay(timeoutMs)
-            if (currentAttemptId == attemptId) {
+            if (currentAttemptId == attemptId && !userPaused) {
                 if (channel.currentSource?.type == StreamType.HLS &&
                     loadingState.feedback(SystemClock.elapsedRealtime()) == null &&
                     playerManager.playerState.value == PlayerState.Playing) return@launch
@@ -1762,6 +1899,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startWebWatchWatchdog(channel: Channel, sourceId: String, attemptId: Long) {
+        if (userPaused) return
         webWatchWatchdogJob?.cancel()
         webWatchWatchdogJob = lifecycleScope.launch {
             delay(AppConfig.YOUTUBE_WEB_WATCH_TIMEOUT_MS)
@@ -1799,6 +1937,8 @@ class MainActivity : AppCompatActivity() {
             channel.currentSourceIndex,
             channel.streamSources.size
         )
+
+        if (binding.layoutDrawer.isVisible || binding.layoutSourceSelection.isVisible || settingsBinding?.root?.isVisible == true) return
 
         val srcName = channel.currentSource?.label ?: "線路 ${channel.currentSourceIndex + 1}"
 
@@ -1872,6 +2012,8 @@ class MainActivity : AppCompatActivity() {
             channel.currentSourceIndex,
             channel.streamSources.size
         )
+
+        if (binding.layoutDrawer.isVisible || binding.layoutSourceSelection.isVisible || settingsBinding?.root?.isVisible == true) return
 
         if (channel.streamType == StreamType.YOUTUBE) {
             binding.layoutYoutubeError.isVisible = true
@@ -2131,6 +2273,16 @@ class MainActivity : AppCompatActivity() {
             return super.dispatchKeyEvent(event)
         }
 
+        if (binding.layoutLoading.hasFocus() && binding.loadingActions.isVisible &&
+            keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN)) {
+            if (action == KeyEvent.ACTION_DOWN) {
+                consumedDownKeyCodes.add(keyCode)
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) binding.btnLoadingDismiss.requestFocus()
+                else binding.btnLoadingRetry.requestFocus()
+            }
+            return true
+        }
+
         if (binding.layoutLoading.hasFocus() && keyCode in listOf(
                 KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER
@@ -2291,12 +2443,24 @@ class MainActivity : AppCompatActivity() {
         when (keyCode) {
             KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE,
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                if ((event?.repeatCount ?: 0) > 0) return true
                 val play = when (keyCode) {
                     KeyEvent.KEYCODE_MEDIA_PLAY -> true
                     KeyEvent.KEYCODE_MEDIA_PAUSE -> false
                     else -> if (binding.youtubePlayerView.isVisible)
                         !binding.youtubePlayerView.isPlaybackRequested()
                     else !playerManager.isPlaybackRequested()
+                }
+                userPaused = !play
+                if (!play) {
+                    bufferingWatchdogJob?.cancel()
+                    webWatchWatchdogJob?.cancel()
+                    ytStablePlaybackJob?.cancel()
+                    adWatchdogJob?.cancel()
+                    dismissLoading()
+                } else currentPlayingChannel?.let {
+                    beginLoading(it, currentAttemptId)
+                    startBufferingWatchdog(it, currentAttemptId)
                 }
                 if (binding.youtubePlayerView.isVisible) {
                     if (play) binding.youtubePlayerView.resumeVideo() else binding.youtubePlayerView.pauseVideo()
